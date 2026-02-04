@@ -135,6 +135,55 @@ OMEGA-DEVIN/
 - **Weighted voting**: Configurable strategy weights
 - **Conflict resolution**: Abstain-first when strategies conflict
 
+## Sakana-Style Evolution Loop (NEW)
+
+The system implements a **DGM + DRQ hybrid** self-improvement loop inspired by Sakana AI's research.
+
+### Evolution Loop (`agents/evolution_loop.py`)
+
+**Truth Objects** (written every run for full reproducibility):
+- `RUN_MANIFEST.json` - Git commit, data ranges, seeds, dependency versions
+- `VARIANT_PATCH.json` - Exact config diffs per variant
+- `EVAL_REPORT.json` - Walk-forward results per fold + aggregate
+- `ARCHIVE_INDEX.json` - MAP-Elites buckets (regime x risk)
+- `LIVE_GATING_STATE.json` - Active variant, canary mode, kill-switch status
+
+**Walk-Forward Evaluation Harness**:
+- Train window → test window, multiple folds
+- Regime detection: trend / range / high-vol / low-vol
+- Cost model: spread + slippage + commission always applied
+- Integrity gates: FAIL_CLOSED on missing/gapped/non-monotonic data
+
+**MAP-Elites Archive** (Quality-Diversity):
+- Regime buckets: trend, range, high_vol, low_vol
+- Risk buckets: dd<2%, 2-5%, >5%
+- Stores top K variants per bucket with full provenance
+
+**DRQ Champion Testing**:
+- New variants must beat current champion out-of-sample
+- Must also beat sampled historical champions
+- Prevents cycling and ensures continual improvement
+
+**Canary Deployment**:
+- Paper trading or micro-size before live
+- Kill-switch on max drawdown breach or anomalies
+- Automatic revert to previous champion on failure
+
+### Running Evolution
+
+```bash
+# Run Sakana-style evolution
+python3 run.py sakana-evolve --rounds 10 --variants 5 --bars 1000
+
+# With custom thresholds
+python3 run.py sakana-evolve \
+    --rounds 20 \
+    --variants 10 \
+    --max-dd 10.0 \
+    --min-sharpe 0.5 \
+    --output ./my_evolution
+```
+
 ## Core Principles
 
 1. **Fail-Closed**: If anything is uncertain, do nothing
@@ -145,3 +194,5 @@ OMEGA-DEVIN/
 6. **Self-Improving**: System analyzes and improves itself
 7. **Sentiment-Aware**: Considers market mood and news
 8. **Ensemble-Driven**: Multiple strategies vote on decisions
+9. **Empirically Validated**: Changes must prove themselves out-of-sample
+10. **Canary-First**: New policies paper trade before going live

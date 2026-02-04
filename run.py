@@ -25,6 +25,12 @@ from chimera.evaluation.backtest import Backtester, BacktestConfig, BacktestResu
 from chimera.evaluation.score import Scorer, ScoreCard
 from chimera.core.truth_manifest import TruthManifest
 
+# Sakana-style evolution imports
+from agents.evolution_loop import (
+    EvolutionLoop, EvolutionLoopConfig, EvalConfig, EvolutionConfig,
+    _generate_synthetic_data
+)
+
 
 logging.basicConfig(
     level=logging.INFO,
@@ -262,6 +268,79 @@ def run_analyze(args):
     return 0
 
 
+def run_sakana_evolve(args):
+    """Run Sakana-style DGM + DRQ hybrid evolution loop"""
+    logger.info("=" * 60)
+    logger.info("OmegaQuant Chimera - Sakana Evolution (DGM + DRQ)")
+    logger.info("=" * 60)
+    
+    # Generate synthetic data
+    logger.info(f"Generating {args.bars} bars of synthetic data...")
+    data = _generate_synthetic_data(args.bars)
+    logger.info(f"Data generated: {len(data)} bars")
+    
+    # Configure evolution loop
+    loop_config = EvolutionLoopConfig(
+        max_rounds=args.rounds,
+        variants_per_round=args.variants,
+        mutation_rate=args.mutation_rate,
+        mutation_strength=args.mutation_strength,
+        patch_budget=args.patch_budget,
+        output_dir=args.output,
+        canary_trades_required=args.canary_trades,
+        canary_max_dd=args.canary_max_dd,
+    )
+    
+    eval_config = EvalConfig(
+        train_bars=args.train_bars,
+        test_bars=args.test_bars,
+        n_folds=args.folds,
+        max_drawdown_threshold=args.max_dd,
+        min_sharpe_threshold=args.min_sharpe,
+        max_turnover_threshold=args.max_turnover,
+        stability_threshold=args.stability,
+    )
+    
+    # Create initial config if provided
+    initial_config = None
+    if args.config:
+        with open(args.config) as f:
+            config_dict = json.load(f)
+        initial_config = EvolutionConfig.from_dict(config_dict)
+        logger.info(f"Loaded initial config from {args.config}")
+    
+    # Run evolution
+    logger.info(f"Starting Sakana evolution: {args.rounds} rounds, {args.variants} variants/round")
+    loop = EvolutionLoop(loop_config, eval_config)
+    result = loop.run(data, initial_config=initial_config, max_rounds=args.rounds)
+    
+    # Print results
+    print("\n" + "=" * 60)
+    print("SAKANA EVOLUTION RESULTS")
+    print("=" * 60)
+    
+    print(f"\nRounds Completed: {result['rounds_completed']}")
+    print(f"Total Variants Evaluated: {result['total_variants_evaluated']}")
+    print(f"Archive Size: {result['archive_size']}")
+    print(f"Best Fitness: {result['best_fitness']:.4f}")
+    
+    if result['champion_id']:
+        print(f"\nChampion Variant: {result['champion_id']}")
+    
+    print(f"\nOutput Directory: {args.output}")
+    print("Truth Objects Created:")
+    print("  - RUN_MANIFEST_*.json (provenance)")
+    print("  - VARIANT_PATCH_*.json (config diffs)")
+    print("  - EVAL_REPORT_*.json (walk-forward results)")
+    print("  - ARCHIVE_INDEX.json (MAP-Elites buckets)")
+    print("  - LIVE_GATING_STATE.json (canary/kill-switch)")
+    print("  - CHAMPION_CONFIG.json (active config)")
+    
+    print("\n" + "=" * 60)
+    
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="OmegaQuant Chimera - Fail-Closed FX Trading Brain"
@@ -299,6 +378,26 @@ def main():
     analyze_parser.add_argument("--genome", "-g", help="Path to genome JSON file")
     analyze_parser.add_argument("--result", "-r", help="Path to result JSON file")
     
+    # Sakana evolution command (DGM + DRQ hybrid)
+    sakana_parser = subparsers.add_parser("sakana-evolve", help="Run Sakana-style DGM + DRQ evolution")
+    sakana_parser.add_argument("--bars", "-b", type=int, default=1000, help="Total bars of data")
+    sakana_parser.add_argument("--rounds", "-r", type=int, default=10, help="Number of evolution rounds")
+    sakana_parser.add_argument("--variants", "-v", type=int, default=5, help="Variants per round")
+    sakana_parser.add_argument("--train-bars", type=int, default=200, help="Training bars per fold")
+    sakana_parser.add_argument("--test-bars", type=int, default=100, help="Test bars per fold")
+    sakana_parser.add_argument("--folds", type=int, default=3, help="Number of walk-forward folds")
+    sakana_parser.add_argument("--mutation-rate", type=float, default=0.2, help="Mutation rate")
+    sakana_parser.add_argument("--mutation-strength", type=float, default=0.15, help="Mutation strength")
+    sakana_parser.add_argument("--patch-budget", type=int, default=5, help="Max params to mutate per variant")
+    sakana_parser.add_argument("--max-dd", type=float, default=15.0, help="Max drawdown threshold (%)")
+    sakana_parser.add_argument("--min-sharpe", type=float, default=0.0, help="Min Sharpe threshold")
+    sakana_parser.add_argument("--max-turnover", type=float, default=50.0, help="Max turnover threshold")
+    sakana_parser.add_argument("--stability", type=float, default=10.0, help="Max stability (return std) threshold")
+    sakana_parser.add_argument("--canary-trades", type=int, default=10, help="Trades required in canary mode")
+    sakana_parser.add_argument("--canary-max-dd", type=float, default=5.0, help="Max DD in canary mode (%)")
+    sakana_parser.add_argument("--config", "-c", help="Path to initial config JSON")
+    sakana_parser.add_argument("--output", "-o", default="./evolution_output", help="Output directory")
+    
     args = parser.parse_args()
     
     if args.command == "backtest":
@@ -307,6 +406,8 @@ def main():
         return run_evolution(args)
     elif args.command == "analyze":
         return run_analyze(args)
+    elif args.command == "sakana-evolve":
+        return run_sakana_evolve(args)
     else:
         parser.print_help()
         return 1
