@@ -113,10 +113,16 @@ class RunManifest:
         
         # Get dependency versions
         versions = {
-            "python": os.popen("python3 --version").read().strip(),
+            "python": "unknown",
             "numpy": "unknown",
             "pandas": "unknown",
         }
+        try:
+            versions["python"] = subprocess.check_output(
+                ["python3", "--version"], stderr=subprocess.STDOUT
+            ).decode().strip()
+        except Exception:
+            pass
         try:
             import numpy
             versions["numpy"] = numpy.__version__
@@ -1491,6 +1497,16 @@ class EvolutionLoop:
             patch_path = self.output_dir / f"VARIANT_PATCH_{patch.variant_id}.json"
             with open(patch_path, "w") as f:
                 json.dump(patch.to_dict(), f, indent=2)
+
+            # Always record evaluation attempts for auditability. Only passing
+            # variants will be kept in the archive buckets.
+            self.archive.add(
+                variant_id=patch.variant_id,
+                config=variant_config.to_dict(),
+                eval_report=report,
+                manifest_id=manifest.run_id,
+                eval_report_path=str(report_path),
+            )
             
             if report.passed_all_gates:
                 round_result["variants_passed"] += 1
@@ -1499,15 +1515,6 @@ class EvolutionLoop:
                 fitness = self._calculate_fitness(report)
                 if fitness > round_result["best_fitness"]:
                     round_result["best_fitness"] = fitness
-                
-                # Try to add to archive
-                self.archive.add(
-                    variant_id=patch.variant_id,
-                    config=variant_config.to_dict(),
-                    eval_report=report,
-                    manifest_id=manifest.run_id,
-                    eval_report_path=str(report_path),
-                )
                 
                 # Test against champions for promotion
                 if fitness > self.best_fitness:
