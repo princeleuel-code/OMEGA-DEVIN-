@@ -28,6 +28,10 @@ from chimera.evolution.behaviors import compute_behavior
 from chimera.evaluation.backtest import Backtester, BacktestConfig, BacktestResult
 from chimera.evaluation.walk_forward import walk_forward, WalkForwardConfig
 from chimera.evaluation.score import Scorer, ScoreCard
+from chimera.evaluation.robustness import (
+    reality_check_bootstrap_max,
+    robustness_report,
+)
 from chimera.core.truth_manifest import TruthManifest
 
 # Sakana-style evolution imports
@@ -427,6 +431,126 @@ def run_sakana_evolve(args):
     return 0
 
 
+def run_robustness(args):
+    """
+    Adversarial robustness suite:
+    - permutation test (return-shuffled OHLCV null)
+    - bootstrap-max "reality check" across strategy variants
+    - regime stress test scaffolding (scenario-based; currently synthetic)
+    """
+    logger.info("=" * 60)
+    logger.info("OmegaQuant Chimera - Robustness Suite")
+    logger.info("=" * 60)
+
+    # This command can run many backtests (permutations/variants). Suppress
+    # per-bar decision spam to keep output readable.
+    logging.getLogger("chimera.core.decision_engine").setLevel(logging.ERROR)
+    logging.getLogger("chimera.core.veto_cascade").setLevel(logging.ERROR)
+
+    # Load or generate data
+    loader = DataLoader(symbol=args.symbol)
+    if args.data:
+        logger.info(f"Loading data from {args.data}")
+        data = loader.load_csv(Path(args.data))
+    else:
+        logger.info(f"Generating {args.bars} bars of synthetic data")
+        if args.regime_data:
+            data = loader.generate_regime_data(num_bars=args.bars)
+        else:
+            data = loader.generate_synthetic(num_bars=args.bars)
+
+    # Integrity check (fail-closed unless --force)
+    checker = IntegrityChecker()
+    integrity = checker.check_series(data)
+    if not integrity.valid and not args.force:
+        logger.error(f"Data integrity check failed: {len(integrity.issues)} issues")
+        logger.error("Use --force to run anyway")
+        return 1
+
+    # Backtest config (costs always on via spread)
+    config = BacktestConfig(
+        initial_capital=args.capital,
+        symbol=args.symbol,
+        spread_pips=args.spread,
+    )
+
+    # Strategy set: default genome + random variants
+    genomes = [create_default_genome()]
+    for _ in range(max(0, int(args.variants) - 1)):
+        genomes.append(create_random_genome())
+
+    # Observed + permutation null for the default genome
+    perm_report = robustness_report(
+        bars=data,
+        genome=genomes[0],
+        backtest_config=config,
+        permutations=args.permutations,
+        seed=args.seed,
+    )
+
+    # Bootstrap-max reality check across variants
+    backtester = Backtester(config=config)
+    series = []
+    for g in genomes:
+        res = backtester.run(data, g, create_manifest=False)
+        eq = res.equity_curve
+        rets = []
+        for i in range(1, len(eq)):
+            prev = eq[i - 1]
+            cur = eq[i]
+            rets.append(0.0 if prev == 0 else (cur - prev) / prev)
+        series.append(rets)
+
+    rc = reality_check_bootstrap_max(
+        series,
+        bootstrap_samples=args.bootstrap,
+        seed=args.seed,
+    )
+
+    report = {
+        "symbol": args.symbol,
+        "bars": len(data),
+        "config": {
+            "spread_pips": args.spread,
+            "permutations": args.permutations,
+            "variants": args.variants,
+            "bootstrap": args.bootstrap,
+            "seed": args.seed,
+        },
+        "permutation_test": perm_report,
+        "reality_check": {
+            "observed_best_metric": rc.observed_best_metric,
+            "p_value": rc.p_value,
+            "strategies": rc.strategies,
+            "bootstrap_samples": rc.bootstrap_samples,
+        },
+        "note": (
+            "This report is a robustness aid, not a performance guarantee. "
+            "Permutation nulls are synthetic unless real data is provided."
+        ),
+    }
+
+    print("\n" + "=" * 60)
+    print("ROBUSTNESS REPORT")
+    print("=" * 60)
+    print(f"\nSymbol: {report['symbol']}")
+    print(f"Bars: {report['bars']}")
+    print("\n--- Permutation Test (Return) ---")
+    p_perm = report["permutation_test"]["permutation_null"]["p_value_return"]
+    print(f"p_value_return: {p_perm}")
+    print("\n--- Reality Check (Bootstrap-Max) ---")
+    print(f"p_value: {report['reality_check']['p_value']}")
+    print("\n" + "=" * 60)
+
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2))
+        logger.info(f"Wrote robustness report to {out}")
+
+    return 0
+
+
 def run_verify(args) -> int:
     """
     Unified verifier entrypoint (SSOT: CODEX_CONTEXT_PACK.md §7.8).
@@ -608,6 +732,21 @@ def main():
     wf_parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap samples for CI on avg return")
     wf_parser.add_argument("--output", "-o", help="Output path for report JSON")
 
+    # Robustness suite (permutation tests + bootstrap-max reality check)
+    rb_parser = subparsers.add_parser("robustness", help="Run robustness suite (permutation + reality check)")
+    rb_parser.add_argument("--data", "-d", help="Path to data CSV file")
+    rb_parser.add_argument("--symbol", "-s", default="EURUSD", help="Symbol to trade")
+    rb_parser.add_argument("--bars", "-b", type=int, default=500, help="Number of bars for synthetic data")
+    rb_parser.add_argument("--capital", "-c", type=float, default=10000, help="Initial capital")
+    rb_parser.add_argument("--spread", type=float, default=1.0, help="Spread in pips (must be > 0)")
+    rb_parser.add_argument("--regime-data", action="store_true", help="Generate data with regime changes")
+    rb_parser.add_argument("--force", "-f", action="store_true", help="Run even if data integrity fails")
+    rb_parser.add_argument("--permutations", type=int, default=200, help="Permutation runs for null distribution")
+    rb_parser.add_argument("--variants", type=int, default=10, help="Strategy variants for reality check")
+    rb_parser.add_argument("--bootstrap", type=int, default=500, help="Bootstrap samples for reality check")
+    rb_parser.add_argument("--seed", type=int, default=1337, help="RNG seed")
+    rb_parser.add_argument("--output", "-o", help="Output path for robustness JSON")
+
     # Unified verifier entrypoint
     verify_parser = subparsers.add_parser("verify", help="Run the unified verifier suite")
     verify_parser.add_argument(
@@ -636,6 +775,8 @@ def main():
         if getattr(args, "step_bars", 0) == 0:
             args.step_bars = args.test_bars
         return run_walkforward(args)
+    elif args.command == "robustness":
+        return run_robustness(args)
     elif args.command == "verify":
         return run_verify(args)
     else:
