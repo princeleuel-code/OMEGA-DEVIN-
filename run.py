@@ -288,7 +288,8 @@ def run_sakana_evolve(args):
         patch_budget=args.patch_budget,
         output_dir=args.output,
         canary_trades_required=args.canary_trades,
-        canary_max_dd=args.canary_max_dd,
+        # CLI uses --canary-max-dd but config field is canary_max_dd_pct
+        canary_max_dd_pct=args.canary_max_dd,
     )
     
     eval_config = EvalConfig(
@@ -324,8 +325,11 @@ def run_sakana_evolve(args):
     print(f"Archive Size: {result['archive_size']}")
     print(f"Best Fitness: {result['best_fitness']:.4f}")
     
-    if result['champion_id']:
-        print(f"\nChampion Variant: {result['champion_id']}")
+    champion_variant_id = None
+    if getattr(loop, "live_state", None):
+        champion_variant_id = loop.live_state.active_variant_id
+    if champion_variant_id and champion_variant_id != "initial":
+        print(f"\nChampion Variant: {champion_variant_id}")
     
     print(f"\nOutput Directory: {args.output}")
     print("Truth Objects Created:")
