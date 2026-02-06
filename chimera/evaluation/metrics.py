@@ -10,6 +10,12 @@ from datetime import datetime
 import math
 
 
+# Anti-fraud guardrails for risk-adjusted metrics. Sharpe/Sortino can explode on
+# tiny-N (e.g., 1-2 non-zero returns) and should not be treated as signal.
+_MIN_NONZERO_RETURNS_FOR_RATIOS = 5
+_RATIO_CAP_ABS = 10.0
+
+
 @dataclass
 class Trade:
     """Record of a single trade"""
@@ -264,12 +270,15 @@ class PerformanceMetrics:
             
             # Sharpe ratio
             excess_return = metrics.annualized_return - risk_free_rate * 100
-            if metrics.volatility > 0:
+            nonzero_returns = [r for r in returns if abs(r) > 1e-12]
+            if len(nonzero_returns) >= _MIN_NONZERO_RETURNS_FOR_RATIOS and metrics.volatility > 0:
                 metrics.sharpe_ratio = excess_return / metrics.volatility
+                metrics.sharpe_ratio = max(-_RATIO_CAP_ABS, min(_RATIO_CAP_ABS, metrics.sharpe_ratio))
             
             # Sortino ratio
-            if metrics.downside_volatility > 0:
+            if len(nonzero_returns) >= _MIN_NONZERO_RETURNS_FOR_RATIOS and metrics.downside_volatility > 0:
                 metrics.sortino_ratio = excess_return / metrics.downside_volatility
+                metrics.sortino_ratio = max(-_RATIO_CAP_ABS, min(_RATIO_CAP_ABS, metrics.sortino_ratio))
             
             # Calmar ratio
             if metrics.max_drawdown_pct > 0:
