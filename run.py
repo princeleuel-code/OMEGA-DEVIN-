@@ -22,6 +22,7 @@ from chimera.evolution.genome import StrategyGenome, create_default_genome, crea
 from chimera.evolution.drq_loop import DRQLoop, DRQConfig, Scenario, EvaluationResult
 from chimera.evolution.behaviors import compute_behavior
 from chimera.evaluation.backtest import Backtester, BacktestConfig, BacktestResult
+from chimera.evaluation.walk_forward import walk_forward, WalkForwardConfig
 from chimera.evaluation.score import Scorer, ScoreCard
 from chimera.core.truth_manifest import TruthManifest
 
@@ -248,6 +249,83 @@ def run_evolution(args):
     return 0
 
 
+def run_walkforward(args):
+    """Run purged walk-forward evaluation (costs always on)."""
+    logger.info("=" * 60)
+    logger.info("OmegaQuant Chimera - Walk-Forward Evaluation")
+    logger.info("=" * 60)
+
+    # Load or create genome
+    if args.genome:
+        logger.info(f"Loading genome from {args.genome}")
+        genome = StrategyGenome.load(args.genome)
+    else:
+        logger.info("Using default genome")
+        genome = create_default_genome()
+
+    # Load or generate data
+    loader = DataLoader(symbol=args.symbol)
+    if args.data:
+        logger.info(f"Loading data from {args.data}")
+        data = loader.load_csv(Path(args.data))
+    else:
+        logger.info(f"Generating {args.bars} bars of synthetic data")
+        if args.regime_data:
+            data = loader.generate_regime_data(num_bars=args.bars)
+        else:
+            data = loader.generate_synthetic(num_bars=args.bars)
+
+    # Integrity check (fail-closed unless --force)
+    checker = IntegrityChecker()
+    integrity = checker.check_series(data)
+    if not integrity.valid and not args.force:
+        logger.error(f"Data integrity check failed: {len(integrity.issues)} issues")
+        logger.error("Use --force to run anyway")
+        return 1
+
+    bt_config = BacktestConfig(
+        initial_capital=args.capital,
+        symbol=args.symbol,
+        spread_pips=args.spread,
+        slippage_pips=args.slippage,
+        commission_per_lot=args.commission,
+    )
+
+    wf_config = WalkForwardConfig(
+        n_folds=args.folds,
+        train_bars=args.train_bars,
+        test_bars=args.test_bars,
+        step_bars=args.step_bars,
+        purge_bars=args.purge_bars,
+        min_trades_per_fold=args.min_trades_per_fold,
+        bootstrap_samples=args.bootstrap,
+    )
+
+    report = walk_forward(data=data, genome=genome, backtest_config=bt_config, wf_config=wf_config)
+
+    print("\n" + "=" * 60)
+    print("WALK-FORWARD REPORT")
+    print("=" * 60)
+    print(f"\nSymbol: {report.symbol}")
+    print(f"Bars: {report.total_bars}")
+    print(f"Folds: {len(report.folds)}")
+    print(f"Verdict: {report.verdict}")
+    print("\n--- Aggregate ---")
+    for k in ["avg_return", "avg_sharpe", "avg_trades", "avg_win_rate", "pass_rate", "return_ci_lower", "return_ci_upper"]:
+        if k in report.aggregate:
+            print(f"{k}: {report.aggregate[k]}")
+
+    # Save results if requested
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report.to_dict(), indent=2))
+        logger.info(f"Wrote walk-forward report to {out}")
+
+    print("\n" + "=" * 60)
+    return 0
+
+
 def run_analyze(args):
     """Analyze a genome or backtest result"""
     logger.info("=" * 60)
@@ -401,6 +479,27 @@ def main():
     sakana_parser.add_argument("--canary-max-dd", type=float, default=5.0, help="Max DD in canary mode (%)")
     sakana_parser.add_argument("--config", "-c", help="Path to initial config JSON")
     sakana_parser.add_argument("--output", "-o", default="./evolution_output", help="Output directory")
+
+    # Walk-forward evaluation (purged)
+    wf_parser = subparsers.add_parser("walkforward", help="Run purged walk-forward evaluation")
+    wf_parser.add_argument("--genome", "-g", help="Path to genome JSON file")
+    wf_parser.add_argument("--data", "-d", help="Path to data CSV file")
+    wf_parser.add_argument("--symbol", "-s", default="EURUSD", help="Symbol to trade")
+    wf_parser.add_argument("--bars", "-b", type=int, default=2000, help="Number of bars for synthetic data")
+    wf_parser.add_argument("--capital", "-c", type=float, default=10000, help="Initial capital")
+    wf_parser.add_argument("--spread", type=float, default=1.0, help="Spread in pips (must be > 0)")
+    wf_parser.add_argument("--slippage", type=float, default=0.5, help="Slippage in pips")
+    wf_parser.add_argument("--commission", type=float, default=0.0, help="Commission per lot")
+    wf_parser.add_argument("--regime-data", action="store_true", help="Generate data with regime changes")
+    wf_parser.add_argument("--force", "-f", action="store_true", help="Run even if data integrity fails")
+    wf_parser.add_argument("--folds", type=int, default=5, help="Number of walk-forward folds")
+    wf_parser.add_argument("--train-bars", type=int, default=250, help="Training bars per fold")
+    wf_parser.add_argument("--test-bars", type=int, default=125, help="Test bars per fold")
+    wf_parser.add_argument("--step-bars", type=int, default=0, help="Step size between folds (0 = test-bars)")
+    wf_parser.add_argument("--purge-bars", type=int, default=5, help="Purge gap between train/test (bars)")
+    wf_parser.add_argument("--min-trades-per-fold", type=int, default=3, help="Minimum trades required per fold")
+    wf_parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap samples for CI on avg return")
+    wf_parser.add_argument("--output", "-o", help="Output path for report JSON")
     
     args = parser.parse_args()
     
@@ -412,6 +511,11 @@ def main():
         return run_analyze(args)
     elif args.command == "sakana-evolve":
         return run_sakana_evolve(args)
+    elif args.command == "walkforward":
+        # Normalize step-bars default.
+        if getattr(args, "step_bars", 0) == 0:
+            args.step_bars = args.test_bars
+        return run_walkforward(args)
     else:
         parser.print_help()
         return 1
