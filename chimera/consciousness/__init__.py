@@ -25,6 +25,17 @@ from .explanation import ExplanationGenerator, DecisionExplanation, ExplanationS
 from .reflection import MetaCognitiveMonitor, PerformanceState
 from .adaptation import OnlineLearner, BeliefUpdate
 from .consciousness import MarketConsciousness, create_consciousness
+from .delta_print import (
+    DeltaPrintIntelligence,
+    DeltaPrintAnalysis,
+    DeltaPrintZone,
+    DeltaLevel,
+    BigTrade,
+    AbsorptionPattern,
+    VolumeLedge,
+    ValueArea,
+    create_delta_print_intelligence,
+)
 
 __all__ = [
     # Core consciousness
@@ -63,4 +74,15 @@ __all__ = [
     # Layer 7: Adaptation
     "OnlineLearner",
     "BeliefUpdate",
+    
+    # Delta Print Intelligence (SURPASSES DeepCharts)
+    "DeltaPrintIntelligence",
+    "DeltaPrintAnalysis",
+    "DeltaPrintZone",
+    "DeltaLevel",
+    "BigTrade",
+    "AbsorptionPattern",
+    "VolumeLedge",
+    "ValueArea",
+    "create_delta_print_intelligence",
 ]
