@@ -96,6 +96,30 @@ Evidence:
    - Evidence: `agents/evolution_loop.py:1488-1509`
    - Repro: `python3.12 -m unittest -v tests.test_sakana_evolution_counts`
 
+## SOTA Building Blocks (Implemented, Offline-Tested)
+
+15. **VPIN computation (microstructure toxicity)**
+   - Evidence: `chimera/orderflow/vpin.py:1-118`
+   - Tests: `tests/test_orderflow_vpin.py:1-34`
+   - Repro: `python3.12 -m unittest -v tests.test_orderflow_vpin`
+
+16. **Tick Imbalance Bars (activity-driven bars)**
+   - Evidence: `chimera/orderflow/imbalance_bars.py:1-117`
+   - Tests: `tests/test_orderflow_imbalance_bars.py:1-33`
+   - Repro: `python3.12 -m unittest -v tests.test_orderflow_imbalance_bars`
+
+17. **Robustness suite (permutation + bootstrap-max reality check)**
+   - Evidence: `chimera/evaluation/robustness.py:1-280`
+   - Tests: `tests/test_robustness_suite.py:1-73`
+   - Repro:
+     - `python3.12 -m unittest -v tests.test_robustness_suite`
+     - `python3.12 ./run.py robustness --bars 200 --regime-data --permutations 20 --variants 10 --bootstrap 200 --output /tmp/omega_robustness.json`
+
+18. **Online Gaussian HMM filter (streaming regime primitive)**
+   - Evidence: `chimera/intelligence/online_hmm.py:1-121`
+   - Tests: `tests/test_online_hmm.py:1-28`
+   - Repro: `python3.12 -m unittest -v tests.test_online_hmm`
+
 ## Offline / Locking Status
 
 - `omega_frontend/` has `package-lock.json` and uses `npm ci`, but offline installs are **UNVERIFIED** without a pre-populated npm cache.
