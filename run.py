@@ -8,7 +8,11 @@ Command-line interface for running backtests, evolution, and analysis.
 import argparse
 import json
 import logging
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -423,6 +427,109 @@ def run_sakana_evolve(args):
     return 0
 
 
+def run_verify(args) -> int:
+    """
+    Unified verifier entrypoint (SSOT: CODEX_CONTEXT_PACK.md §7.8).
+
+    Runs a minimal, reproducible suite:
+    - compileall
+    - unittest
+    - CLI smoke (backtest + walkforward)
+    - optional frontend lint/build (skippable)
+    """
+
+    repo_root = Path(__file__).parent.resolve()
+
+    env = dict(os.environ)
+    env.setdefault("PYTHONPYCACHEPREFIX", "/tmp/omega_pycache")
+
+    def _run(cmd: list[str], *, cwd: Path) -> int:
+        logger.info("verify: %s (cwd=%s)", " ".join(cmd), cwd)
+        p = subprocess.run(cmd, cwd=str(cwd), env=env)
+        return int(p.returncode)
+
+    # 1) Python compile check
+    rc = _run([sys.executable, "-m", "compileall", "-q", str(repo_root)], cwd=repo_root)
+    if rc != 0:
+        return rc
+
+    # 2) Unit tests
+    rc = _run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], cwd=repo_root)
+    if rc != 0:
+        return rc
+
+    # 3) CLI smokes
+    tmp = Path(tempfile.gettempdir())
+    rc = _run(
+        [
+            sys.executable,
+            str(repo_root / "run.py"),
+            "backtest",
+            "--bars",
+            "50",
+            "--regime-data",
+            "--spread",
+            "1.0",
+            "--output",
+            str(tmp / "omega_verify_backtest.json"),
+        ],
+        cwd=repo_root,
+    )
+    if rc != 0:
+        return rc
+
+    rc = _run(
+        [
+            sys.executable,
+            str(repo_root / "run.py"),
+            "walkforward",
+            "--bars",
+            "300",
+            "--regime-data",
+            "--spread",
+            "1.0",
+            "--folds",
+            "2",
+            "--train-bars",
+            "100",
+            "--test-bars",
+            "50",
+            "--purge-bars",
+            "5",
+            "--bootstrap",
+            "50",
+            "--output",
+            str(tmp / "omega_verify_wf.json"),
+        ],
+        cwd=repo_root,
+    )
+    if rc != 0:
+        return rc
+
+    # 4) Optional frontend checks (canonical UI only)
+    if not getattr(args, "skip_frontend", False):
+        npm = shutil.which("npm")
+        if not npm:
+            logger.warning("verify: npm not found; skipping frontend lint/build")
+            return 0
+
+        fe_root = repo_root / "omega_frontend"
+        if getattr(args, "npm_ci", False):
+            rc = _run([npm, "ci", "--no-audit", "--no-fund"], cwd=fe_root)
+            if rc != 0:
+                return rc
+
+        rc = _run([npm, "run", "lint"], cwd=fe_root)
+        if rc != 0:
+            return rc
+
+        rc = _run([npm, "run", "build"], cwd=fe_root)
+        if rc != 0:
+            return rc
+
+    return 0
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="OmegaQuant Chimera - Fail-Closed FX Trading Brain"
@@ -500,6 +607,19 @@ def main():
     wf_parser.add_argument("--min-trades-per-fold", type=int, default=3, help="Minimum trades required per fold")
     wf_parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap samples for CI on avg return")
     wf_parser.add_argument("--output", "-o", help="Output path for report JSON")
+
+    # Unified verifier entrypoint
+    verify_parser = subparsers.add_parser("verify", help="Run the unified verifier suite")
+    verify_parser.add_argument(
+        "--skip-frontend",
+        action="store_true",
+        help="Skip frontend lint/build (useful for Python-only environments)",
+    )
+    verify_parser.add_argument(
+        "--npm-ci",
+        action="store_true",
+        help="Run `npm ci` in the canonical frontend before lint/build",
+    )
     
     args = parser.parse_args()
     
@@ -516,6 +636,8 @@ def main():
         if getattr(args, "step_bars", 0) == 0:
             args.step_bars = args.test_bars
         return run_walkforward(args)
+    elif args.command == "verify":
+        return run_verify(args)
     else:
         parser.print_help()
         return 1
