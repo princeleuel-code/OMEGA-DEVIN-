@@ -1,6 +1,6 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import asyncio
 import json
@@ -10,6 +10,37 @@ import numpy as np
 
 # Add omega_devin to path
 sys.path.insert(0, '/home/ubuntu/omega_devin')
+
+# Import Provenance System
+from app.provenance import (
+    DataTier,
+    ProvenanceFirewall,
+    ProvenanceTag,
+    TaggedFeature,
+    create_tagged_feature,
+    FEATURE_PROVENANCE_TABLE
+)
+from app.provenance.weave_packet import (
+    WeavePacket,
+    WeavePacketStore,
+    DecisionType,
+    ReasonCode,
+    RenderAnchor,
+    FeatureValue,
+    ConflictInfo,
+    create_wait_packet,
+    packet_store
+)
+from app.provenance.real_dom import (
+    RealDOMManager,
+    BinanceL2Feed,
+    RealDOMSnapshot,
+    dom_manager,
+    get_synthetic_dom_watermarked
+)
+
+# Global provenance firewall
+provenance_firewall = ProvenanceFirewall()
 
 app = FastAPI(title="OMEGA-DEVIN Trading Dashboard API")
 
@@ -1743,4 +1774,335 @@ def get_footprint_data(symbol: str):
         "dom_ladder": dom_ladder,
         "footprint_patterns": footprint_patterns,
         "market_profile": market_profile
+    }
+
+
+# ============================================================================
+# PROVENANCE API ENDPOINTS - Data Provenance Firewall
+# ============================================================================
+
+@app.get("/api/provenance/status")
+def get_provenance_status():
+    """Get current provenance status including real DOM connection state"""
+    return {
+        "real_dom_enabled": dom_manager.real_dom_enabled,
+        "dom_status": dom_manager.get_status(),
+        "firewall_report": provenance_firewall.get_provenance_report(),
+        "blocked_features": provenance_firewall.blocked_features
+    }
+
+
+@app.get("/api/provenance/report")
+def get_provenance_report():
+    """Get full provenance report for audit"""
+    return {
+        "provenance_table": {
+            name: tier.value for name, tier in FEATURE_PROVENANCE_TABLE.items()
+        },
+        "firewall_report": provenance_firewall.get_provenance_report(),
+        "decision_trace": provenance_firewall.decision_trace[-100:]  # Last 100 traces
+    }
+
+
+@app.get("/api/weave-packet/{symbol}")
+def get_weave_packet(symbol: str):
+    """
+    Get the latest WEAVE_PACKET for a symbol.
+    Contains all feature values with provenance tags, decision, and evidence pins.
+    """
+    bars = state.price_history.get(symbol, [])
+    if not bars:
+        return {"error": "No data for symbol", "packet": None}
+    
+    # Get latest bar index
+    bar_index = len(bars) - 1
+    
+    # Check for existing packet
+    existing_packet = packet_store.get_by_bar(symbol, bar_index)
+    if existing_packet:
+        return {"packet": existing_packet.to_dict()}
+    
+    # Generate new packet with current analysis
+    recent_bars = bars[-50:]
+    
+    # Build features with provenance
+    features = {}
+    
+    # Volume Profile (SYNTHETIC - from candles)
+    vp = calculate_volume_profile(recent_bars)
+    features["estimated_volume_profile"] = FeatureValue(
+        name="estimated_volume_profile",
+        value=vp,
+        tier="SYNTHETIC",
+        source="candle_estimation",
+        can_affect_decisions=False,
+        render_anchors=[
+            RenderAnchor(
+                anchor_type="zone",
+                price_low=vp.get("value_area_low", 0),
+                price_high=vp.get("value_area_high", 0),
+                description="Value Area (estimated from candles)"
+            )
+        ] if vp else []
+    )
+    
+    # Delta (SYNTHETIC - from candles)
+    delta_data = calculate_cumulative_delta(recent_bars)
+    features["estimated_delta"] = FeatureValue(
+        name="estimated_delta",
+        value=delta_data,
+        tier="SYNTHETIC",
+        source="candle_estimation",
+        can_affect_decisions=False,
+        render_anchors=[
+            RenderAnchor(
+                anchor_type="candle",
+                bar_index=i,
+                description=f"Delta: {d.get('delta', 0)}"
+            ) for i, d in enumerate(delta_data[-10:])
+        ] if delta_data else []
+    )
+    
+    # DOM (check if real or synthetic)
+    if dom_manager.is_real_dom_available(symbol):
+        real_dom = dom_manager.get_snapshot(symbol)
+        if real_dom:
+            features["real_dom_bids"] = FeatureValue(
+                name="real_dom_bids",
+                value=real_dom.bids,
+                tier="REAL",
+                source="binance_l2_feed",
+                can_affect_decisions=True,
+                render_anchors=[]
+            )
+            features["real_dom_asks"] = FeatureValue(
+                name="real_dom_asks",
+                value=real_dom.asks,
+                tier="REAL",
+                source="binance_l2_feed",
+                can_affect_decisions=True,
+                render_anchors=[]
+            )
+    else:
+        # Synthetic DOM - CANNOT affect decisions
+        synthetic_dom = get_synthetic_dom_watermarked(symbol, recent_bars)
+        features["simulated_dom"] = FeatureValue(
+            name="simulated_dom",
+            value=synthetic_dom,
+            tier="SYNTHETIC",
+            source="candle_estimation",
+            can_affect_decisions=False,
+            render_anchors=[]
+        )
+    
+    # Determine decision based on real data availability
+    real_features = {k: v for k, v in features.items() if v.can_affect_decisions}
+    has_real_data = len(real_features) > 0
+    
+    # Check for conflicts
+    conflict_info = None
+    reason_codes = []
+    evidence_pins = []
+    resolution_conditions = []
+    
+    if not has_real_data:
+        reason_codes.append(ReasonCode.NO_REAL_DATA)
+        evidence_pins.append({
+            "pin_id": "no_real_data",
+            "text": "No real order flow data available",
+            "type": "warning",
+            "bar_index": bar_index,
+            "price": bars[-1]["close"]
+        })
+        resolution_conditions.append({
+            "condition": "Connect to real L2 feed (REAL_DOM=true)",
+            "type": "requirement",
+            "anchors": []
+        })
+    
+    # Check for signal conflicts (Volume vs Delta)
+    vp_signal = "BULLISH" if vp.get("poc", 0) < bars[-1]["close"] else "BEARISH"
+    delta_signal = "BULLISH" if delta_data and delta_data[-1].get("cumulative_delta", 0) > 0 else "BEARISH"
+    
+    if vp_signal != delta_signal:
+        conflict_info = ConflictInfo(
+            conflict_type="VOLUME_DELTA_CONFLICT",
+            signals_in_conflict=["Volume Profile", "Delta Flow"],
+            resolution_conditions=[
+                f"WAIT until Volume Profile and Delta align",
+                f"Volume says {vp_signal}, Delta says {delta_signal}"
+            ],
+            resolution_anchors=[
+                RenderAnchor(
+                    anchor_type="level",
+                    price_low=vp.get("poc", 0),
+                    price_high=vp.get("poc", 0),
+                    description="POC level - watch for acceptance"
+                )
+            ]
+        )
+        reason_codes.append(ReasonCode.CONFLICTING_SIGNALS)
+        evidence_pins.append({
+            "pin_id": "conflict_vp_delta",
+            "text": f"CONFLICT: Volume={vp_signal}, Delta={delta_signal}",
+            "type": "conflict",
+            "bar_index": bar_index,
+            "price": vp.get("poc", bars[-1]["close"])
+        })
+        resolution_conditions.append({
+            "condition": f"Wait for {vp_signal} confirmation above POC" if vp_signal == "BULLISH" else f"Wait for {vp_signal} confirmation below POC",
+            "type": "resolution",
+            "anchors": [{"price": vp.get("poc", 0), "type": "level"}]
+        })
+    
+    # Create packet
+    decision = DecisionType.CONFLICT if conflict_info else (
+        DecisionType.WAIT if not has_real_data else DecisionType.TRADE
+    )
+    
+    confidence = len(real_features) / max(len(features), 1) * 100
+    
+    reason_text = "WAIT: " + ", ".join([r.value for r in reason_codes]) if reason_codes else "Ready to trade"
+    
+    packet = WeavePacket(
+        packet_id="",
+        timestamp=datetime.utcnow(),
+        symbol=symbol,
+        timeframe="1H",
+        bar_index=bar_index,
+        features=features,
+        decision=decision,
+        confidence=confidence,
+        reason_codes=reason_codes,
+        reason_text=reason_text,
+        invalidation_conditions=[],
+        invalidation_anchors=[],
+        conflict_info=conflict_info,
+        evidence_pins=evidence_pins,
+        resolution_conditions=resolution_conditions
+    )
+    
+    # Store packet
+    packet_store.store(packet)
+    
+    return {"packet": packet.to_dict()}
+
+
+@app.get("/api/replay/{symbol}")
+def get_replay_data(symbol: str):
+    """Get replay data for timeline scrubbing"""
+    packets = packet_store.export_for_replay(symbol)
+    return {
+        "symbol": symbol,
+        "total_frames": len(packets),
+        "packets": packets
+    }
+
+
+@app.get("/api/replay/{symbol}/{bar_index}")
+def get_replay_frame(symbol: str, bar_index: int):
+    """Get a specific replay frame for a bar"""
+    packet = packet_store.get_by_bar(symbol, bar_index)
+    if packet:
+        return {"packet": packet.to_dict()}
+    return {"error": "No packet for this bar", "packet": None}
+
+
+@app.get("/api/dom/{symbol}")
+def get_dom_data(symbol: str):
+    """
+    Get DOM data with provenance.
+    Returns REAL DOM if connected, otherwise SYNTHETIC with watermark.
+    """
+    bars = state.price_history.get(symbol, [])
+    
+    # Check for real DOM
+    if dom_manager.is_real_dom_available(symbol):
+        real_dom = dom_manager.get_snapshot(symbol)
+        if real_dom:
+            return {
+                "dom": real_dom.to_dict(),
+                "is_real": True,
+                "provenance_tier": "REAL",
+                "watermark": None,
+                "can_affect_decisions": True
+            }
+    
+    # Return synthetic DOM with watermark
+    synthetic_dom = get_synthetic_dom_watermarked(symbol, bars[-50:] if bars else [])
+    return {
+        "dom": synthetic_dom,
+        "is_real": False,
+        "provenance_tier": "SYNTHETIC",
+        "watermark": "SYNTHETIC / EDUCATIONAL ONLY",
+        "can_affect_decisions": False,
+        "warning": "This DOM is simulated from OHLCV data. DO NOT use for trading decisions."
+    }
+
+
+@app.post("/api/real-dom/start/{symbol}")
+async def start_real_dom(symbol: str):
+    """Start real DOM feed for a symbol (requires REAL_DOM=true)"""
+    if not dom_manager.real_dom_enabled:
+        return {
+            "success": False,
+            "error": "REAL_DOM not enabled. Set REAL_DOM=true environment variable."
+        }
+    
+    success = await dom_manager.start_feed(symbol)
+    return {
+        "success": success,
+        "symbol": symbol,
+        "status": dom_manager.get_status()
+    }
+
+
+@app.get("/api/decision/{symbol}")
+def get_decision(symbol: str):
+    """
+    Get current trading decision with full provenance.
+    CRITICAL: Only Tier A/B features can affect this decision.
+    """
+    bars = state.price_history.get(symbol, [])
+    if not bars:
+        return {
+            "decision": "SKIP",
+            "confidence": 0,
+            "reason": "No data available",
+            "can_trade": False,
+            "provenance_check": "FAILED - No data"
+        }
+    
+    # Get weave packet (generates decision)
+    packet_response = get_weave_packet(symbol)
+    packet_data = packet_response.get("packet", {})
+    
+    if not packet_data:
+        return {
+            "decision": "SKIP",
+            "confidence": 0,
+            "reason": "Failed to generate decision packet",
+            "can_trade": False,
+            "provenance_check": "FAILED"
+        }
+    
+    # Check if we can trade (fail-closed)
+    can_trade = dom_manager.fail_closed_check(symbol) if dom_manager.real_dom_enabled else False
+    
+    return {
+        "decision": packet_data.get("decision", "WAIT"),
+        "confidence": packet_data.get("confidence", 0),
+        "reason": packet_data.get("reason_text", ""),
+        "can_trade": can_trade,
+        "provenance_check": "PASSED" if can_trade else "FAILED - No real data",
+        "evidence_pins": packet_data.get("evidence_pins", []),
+        "resolution_conditions": packet_data.get("resolution_conditions", []),
+        "conflict_info": packet_data.get("conflict_info"),
+        "features_used": {
+            k: {
+                "tier": v.get("tier"),
+                "can_affect_decisions": v.get("can_affect_decisions")
+            }
+            for k, v in packet_data.get("features", {}).items()
+        }
     }

@@ -116,7 +116,238 @@ interface Performance {
   worst_trade: number;
 }
 
-const SignalGauge = ({ value, label, signal }: { value: number, label: string, signal: string }) => {
+// ============================================================================
+// WOVEN CHART INTELLIGENCE - Data Provenance Types
+// ============================================================================
+
+interface EvidencePin {
+  pin_id: string;
+  text: string;
+  type: 'warning' | 'conflict' | 'info' | 'resolution';
+  bar_index: number;
+  price: number;
+}
+
+interface ResolutionCondition {
+  condition: string;
+  type: 'requirement' | 'resolution';
+  anchors: { price: number; type: string }[];
+}
+
+interface ConflictInfo {
+  conflict_type: string;
+  signals_in_conflict: string[];
+  resolution_conditions: string[];
+}
+
+interface FeatureProvenance {
+  tier: 'REAL' | 'DERIVED' | 'SYNTHETIC';
+  can_affect_decisions: boolean;
+  watermark?: string;
+}
+
+interface WeavePacket {
+  packet_id: string;
+  timestamp: string;
+  symbol: string;
+  timeframe: string;
+  bar_index: number;
+  decision: 'TRADE' | 'WAIT' | 'SKIP' | 'CONFLICT';
+  confidence: number;
+  reason_codes: string[];
+  reason_text: string;
+  evidence_pins: EvidencePin[];
+  resolution_conditions: ResolutionCondition[];
+  conflict_info?: ConflictInfo;
+  features: Record<string, {
+    name: string;
+    value: any;
+    tier: string;
+    can_affect_decisions: boolean;
+  }>;
+}
+
+interface DecisionResponse {
+  decision: string;
+  confidence: number;
+  reason: string;
+  can_trade: boolean;
+  provenance_check: string;
+  evidence_pins: EvidencePin[];
+  resolution_conditions: ResolutionCondition[];
+  conflict_info?: ConflictInfo;
+  features_used: Record<string, FeatureProvenance>;
+}
+
+// ============================================================================
+// WOVEN CHART INTELLIGENCE - No-Trade Fog Component
+// ============================================================================
+
+const NoTradeFog = ({ 
+  decision, 
+  evidencePins, 
+  resolutionConditions,
+  conflictInfo,
+  onPinClick 
+}: { 
+  decision: DecisionResponse | null;
+  evidencePins: EvidencePin[];
+  resolutionConditions: ResolutionCondition[];
+  conflictInfo?: ConflictInfo;
+  onPinClick: (pin: EvidencePin) => void;
+}) => {
+  if (!decision || decision.decision === 'TRADE') return null;
+  
+  const isConflict = decision.decision === 'CONFLICT';
+  // isWait used for styling differentiation
+  const _isWait = decision.decision === 'WAIT';
+  void _isWait; // Suppress unused warning
+  
+  return (
+    <div className="absolute inset-0 pointer-events-none z-10">
+      {/* Fog overlay */}
+      <div className={`absolute inset-0 ${
+        isConflict 
+          ? 'bg-gradient-to-b from-amber-900/40 to-amber-950/60' 
+          : 'bg-gradient-to-b from-slate-900/50 to-slate-950/70'
+      }`} />
+      
+      {/* Top banner */}
+      <div className={`absolute top-0 left-0 right-0 p-2 ${
+        isConflict ? 'bg-amber-600/90' : 'bg-red-600/90'
+      } text-white text-center font-bold pointer-events-auto`}>
+        <div className="flex items-center justify-center gap-2">
+          <AlertTriangle className="w-5 h-5" />
+          <span>{isConflict ? 'CONFLICT MODE' : 'NO TRADE'} - {decision.reason}</span>
+        </div>
+      </div>
+      
+      {/* Evidence Pins */}
+      <div className="absolute top-12 left-2 right-2 space-y-2 pointer-events-auto">
+        {evidencePins.map((pin, i) => (
+          <div 
+            key={pin.pin_id || i}
+            onClick={() => onPinClick(pin)}
+            className={`p-2 rounded cursor-pointer transition-all hover:scale-105 ${
+              pin.type === 'conflict' ? 'bg-amber-800/90 border border-amber-500' :
+              pin.type === 'warning' ? 'bg-red-800/90 border border-red-500' :
+              pin.type === 'resolution' ? 'bg-blue-800/90 border border-blue-500' :
+              'bg-slate-800/90 border border-slate-500'
+            }`}
+          >
+            <div className="flex items-center gap-2 text-white text-sm">
+              <Eye className="w-4 h-4" />
+              <span>{pin.text}</span>
+              <span className="text-xs opacity-70">Click to highlight</span>
+            </div>
+          </div>
+        ))}
+      </div>
+      
+      {/* Resolution Conditions */}
+      {resolutionConditions.length > 0 && (
+        <div className="absolute bottom-2 left-2 right-2 p-3 bg-blue-900/90 rounded border border-blue-500 pointer-events-auto">
+          <div className="text-blue-200 text-sm font-bold mb-1">Resolution Conditions:</div>
+          {resolutionConditions.map((cond, i) => (
+            <div key={i} className="text-blue-100 text-xs flex items-center gap-1">
+              <Target className="w-3 h-3" />
+              {cond.condition}
+            </div>
+          ))}
+        </div>
+      )}
+      
+      {/* Conflict Info */}
+      {conflictInfo && (
+        <div className="absolute bottom-20 left-2 right-2 p-3 bg-amber-900/90 rounded border border-amber-500 pointer-events-auto">
+          <div className="text-amber-200 text-sm font-bold mb-1">
+            {conflictInfo.conflict_type.replace(/_/g, ' ')}
+          </div>
+          <div className="text-amber-100 text-xs">
+            Signals in conflict: {conflictInfo.signals_in_conflict.join(' vs ')}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============================================================================
+// WOVEN CHART INTELLIGENCE - Synthetic Data Watermark
+// ============================================================================
+
+const _SyntheticWatermark = ({ feature: _feature, tier }: { feature: string; tier: string }) => {
+  void _feature; // Feature name for future use
+  if (tier !== 'SYNTHETIC') return null;
+  
+  return (
+    <div className="absolute top-0 right-0 bg-amber-600/90 text-white text-xs px-2 py-1 rounded-bl font-bold z-20">
+      SYNTHETIC / EDUCATIONAL ONLY
+    </div>
+  );
+};
+void _SyntheticWatermark; // Reserved for future use
+
+// ============================================================================
+// WOVEN CHART INTELLIGENCE - Click-to-Highlight Panel Row
+// ============================================================================
+
+const _ClickableSignalRow = ({
+  name, 
+  bias, 
+  reason, 
+  tier,
+  canAffectDecisions,
+  onHighlight,
+  isHighlighted
+}: { 
+  name: string;
+  bias: string;
+  reason: string;
+  tier: string;
+  canAffectDecisions: boolean;
+  onHighlight: () => void;
+  isHighlighted: boolean;
+}) => {
+  const getBiasColor = (b: string) => {
+    if (b === 'BULLISH') return 'text-emerald-400';
+    if (b === 'BEARISH') return 'text-red-400';
+    return 'text-slate-400';
+  };
+  
+  return (
+    <div 
+      onClick={onHighlight}
+      className={`p-2 rounded cursor-pointer transition-all ${
+        isHighlighted 
+          ? 'bg-cyan-900/50 border border-cyan-500 scale-105' 
+          : 'bg-slate-800/50 hover:bg-slate-700/50'
+      } ${!canAffectDecisions ? 'opacity-60' : ''}`}
+    >
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-slate-300 text-sm">{name}</span>
+          {tier === 'SYNTHETIC' && (
+            <span className="text-amber-500 text-xs px-1 bg-amber-900/50 rounded">SIM</span>
+          )}
+        </div>
+        <span className={`font-bold text-sm ${getBiasColor(bias)}`}>{bias}</span>
+      </div>
+      <div className="text-slate-500 text-xs mt-1">{reason}</div>
+      {!canAffectDecisions && (
+        <div className="text-amber-500 text-xs mt-1 italic">
+          Cannot affect trading decisions
+        </div>
+      )}
+      <div className="text-cyan-400 text-xs mt-1 opacity-70">
+        Click to highlight on chart
+      </div>
+    </div>
+  );
+};
+void _ClickableSignalRow; // Reserved for future use
+
+const SignalGauge= ({ value, label, signal }: { value: number, label: string, signal: string }) => {
   const getColor = () => {
     if (signal.includes('BUY') || signal.includes('BULLISH')) return '#10b981';
     if (signal.includes('SELL') || signal.includes('BEARISH')) return '#ef4444';
@@ -1938,7 +2169,12 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
   const cvdRange = cvdMax - cvdMin || 1;
 
   return (
-    <div className="h-full flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-lg overflow-hidden shadow-2xl border border-slate-700/50">
+    <div className="h-full flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-lg overflow-hidden shadow-2xl border border-slate-700/50 relative">
+      {/* WOVEN CHART INTELLIGENCE - Synthetic Data Watermark */}
+      <div className="absolute top-0 right-0 bg-amber-600/90 text-white text-xs px-2 py-1 rounded-bl font-bold z-20">
+        SYNTHETIC / EDUCATIONAL ONLY
+      </div>
+      
       {/* Header with DeepCharts ULTRA branding */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700/50 bg-gradient-to-r from-cyan-900/20 via-purple-900/20 to-cyan-900/20">
         <div className="flex items-center gap-2">
@@ -2521,18 +2757,28 @@ function App() {
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState<'brain' | 'setup' | 'mtf' | 'accuracy' | 'orderflow' | 'levels' | 'risk' | 'footprint'>('brain');
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
+  
+  // WOVEN CHART INTELLIGENCE - Provenance State
+  const [decision, setDecision] = useState<DecisionResponse | null>(null);
+  const [_weavePacket, setWeavePacket] = useState<WeavePacket | null>(null);
+  const [_highlightedFeature, setHighlightedFeature] = useState<string | null>(null);
+  const [_highlightedBarIndex, setHighlightedBarIndex] = useState<number | null>(null);
+  // Suppress unused warnings - these are used for future replay mode
+  void _weavePacket; void _highlightedFeature; void _highlightedBarIndex;
 
   const symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'XAUUSD'];
   const decimals = selectedSymbol === 'XAUUSD' ? 2 : selectedSymbol === 'USDJPY' ? 3 : 5;
 
   const fetchData = useCallback(async () => {
     try {
-      const [stateRes, perfRes, pricesRes, chartRes, footprintRes] = await Promise.all([
+      const [stateRes, perfRes, pricesRes, chartRes, footprintRes, decisionRes, weaveRes] = await Promise.all([
         fetch(`${API_URL}/api/state`),
         fetch(`${API_URL}/api/performance`),
         fetch(`${API_URL}/api/prices`),
         fetch(`${API_URL}/api/chart-data/${selectedSymbol}?bars=100`),
-        fetch(`${API_URL}/api/footprint/${selectedSymbol}`)
+        fetch(`${API_URL}/api/footprint/${selectedSymbol}`),
+        fetch(`${API_URL}/api/decision/${selectedSymbol}`).catch(() => null),
+        fetch(`${API_URL}/api/weave-packet/${selectedSymbol}`).catch(() => null)
       ]);
 
       if (stateRes.ok) setState(await stateRes.json());
@@ -2546,6 +2792,17 @@ function App() {
         setChartData(data);
       }
       if (footprintRes.ok) setFootprintData(await footprintRes.json());
+      
+      // WOVEN CHART INTELLIGENCE - Fetch provenance data
+      if (decisionRes?.ok) {
+        const decisionData = await decisionRes.json();
+        setDecision(decisionData);
+      }
+      if (weaveRes?.ok) {
+        const weaveData = await weaveRes.json();
+        setWeavePacket(weaveData);
+      }
+      
       setIsConnected(true);
       setLastUpdate(new Date());
     } catch (error) {
@@ -2584,6 +2841,20 @@ function App() {
     if (structure === 'BEARISH') return <TrendingDown className="w-4 h-4 text-red-400" />;
     return <Activity className="w-4 h-4 text-amber-400" />;
   };
+
+  // WOVEN CHART INTELLIGENCE - Click-to-Highlight Handler
+  const handleEvidencePinClick = useCallback((pin: EvidencePin) => {
+    setHighlightedBarIndex(pin.bar_index);
+    // Auto-clear highlight after 3 seconds
+    setTimeout(() => setHighlightedBarIndex(null), 3000);
+  }, []);
+
+  const _handleFeatureHighlight = useCallback((featureName: string) => {
+    setHighlightedFeature(featureName);
+    // Auto-clear highlight after 3 seconds
+    setTimeout(() => setHighlightedFeature(null), 3000);
+  }, []);
+  void _handleFeatureHighlight; // For future use
 
   return (
     <div className="min-h-screen bg-[#0a0e17] text-white">
@@ -2736,10 +3007,25 @@ function App() {
         </div>
 
         <div className="col-span-7 space-y-4">
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4" style={{ height: '45%' }}>
+          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4 relative" style={{ height: '45%' }}>
+            {/* WOVEN CHART INTELLIGENCE - No-Trade Fog Overlay */}
+            <NoTradeFog
+              decision={decision}
+              evidencePins={decision?.evidence_pins || []}
+              resolutionConditions={decision?.resolution_conditions || []}
+              conflictInfo={decision?.conflict_info}
+              onPinClick={handleEvidencePinClick}
+            />
+            
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-sm font-medium text-slate-400 flex items-center gap-2">
                 <Activity className="w-4 h-4" /> {selectedSymbol} Price Chart with VWAP
+                {/* Provenance indicator */}
+                {decision && !decision.can_trade && (
+                  <span className="text-amber-500 text-xs px-2 py-0.5 bg-amber-900/50 rounded ml-2">
+                    NO TRADE - {decision.provenance_check}
+                  </span>
+                )}
               </h3>
               <div className="flex items-center gap-4 text-xs">
                 <div className="flex items-center gap-1">
