@@ -79,13 +79,18 @@ class ProvenanceFirewall:
         self.feature_registry: Dict[str, TaggedFeature] = {}
         self.blocked_features: List[str] = []
         self.decision_trace: List[Dict[str, Any]] = []
+
+    def reset(self) -> None:
+        """Clear the current feature registry (per-decision)."""
+        self.feature_registry.clear()
+        self.blocked_features.clear()
     
     def register_feature(self, feature: TaggedFeature) -> None:
         """Register a feature with its provenance"""
         self.feature_registry[feature.name] = feature
         
         # Track blocked features
-        if not feature.provenance.can_affect_decisions:
+        if not feature.provenance.can_affect_decisions and feature.name not in self.blocked_features:
             self.blocked_features.append(feature.name)
     
     def get_decision_features(self) -> Dict[str, TaggedFeature]:

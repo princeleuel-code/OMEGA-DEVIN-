@@ -1,15 +1,11 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncio
 import json
-import sys
 import os
 import numpy as np
-
-# Add omega_devin to path
-sys.path.insert(0, '/home/ubuntu/omega_devin')
 
 # Import Provenance System
 from app.provenance import (
@@ -31,13 +27,9 @@ from app.provenance.weave_packet import (
     create_wait_packet,
     packet_store
 )
-from app.provenance.real_dom import (
-    RealDOMManager,
-    BinanceL2Feed,
-    RealDOMSnapshot,
-    dom_manager,
-    get_synthetic_dom_watermarked
-)
+from app.provenance.dom_types import RealDOMSnapshot
+from app.provenance.market_data_provider import market_data_registry
+from app.provenance.why_wait import generate_why_wait
 
 # Global provenance firewall
 provenance_firewall = ProvenanceFirewall()
@@ -1785,8 +1777,8 @@ def get_footprint_data(symbol: str):
 def get_provenance_status():
     """Get current provenance status including real DOM connection state"""
     return {
-        "real_dom_enabled": dom_manager.real_dom_enabled,
-        "dom_status": dom_manager.get_status(),
+        "real_dom_required": os.environ.get("REAL_DOM", "false").lower() == "true",
+        "dom_status": market_data_registry.get_status(),
         "firewall_report": provenance_firewall.get_provenance_report(),
         "blocked_features": provenance_firewall.blocked_features
     }
@@ -1863,110 +1855,143 @@ def get_weave_packet(symbol: str):
         ] if delta_data else []
     )
     
-    # DOM (check if real or synthetic)
-    if dom_manager.is_real_dom_available(symbol):
-        real_dom = dom_manager.get_snapshot(symbol)
-        if real_dom:
-            features["real_dom_bids"] = FeatureValue(
-                name="real_dom_bids",
-                value=real_dom.bids,
-                tier="REAL",
-                source="binance_l2_feed",
-                can_affect_decisions=True,
-                render_anchors=[]
-            )
-            features["real_dom_asks"] = FeatureValue(
-                name="real_dom_asks",
-                value=real_dom.asks,
-                tier="REAL",
-                source="binance_l2_feed",
-                can_affect_decisions=True,
-                render_anchors=[]
-            )
+    # DOM (Real) comes from MarketDataRegistry providers; synthetic DOM may be displayed but must not affect decisions.
+    dom_check = market_data_registry.fail_closed_check(symbol)
+    dom_snapshot = market_data_registry.get_snapshot(symbol)
+
+    if dom_snapshot and dom_snapshot.is_real:
+        # Real DOM: Tier A features.
+        features["real_dom_bids"] = FeatureValue(
+            name="real_dom_bids",
+            value=[b.to_dict() for b in dom_snapshot.bids],
+            tier="REAL",
+            source=f"{dom_check.get('provider', 'unknown')}_l2",
+            can_affect_decisions=True,
+            render_anchors=[],
+        )
+        features["real_dom_asks"] = FeatureValue(
+            name="real_dom_asks",
+            value=[a.to_dict() for a in dom_snapshot.asks],
+            tier="REAL",
+            source=f"{dom_check.get('provider', 'unknown')}_l2",
+            can_affect_decisions=True,
+            render_anchors=[],
+        )
+        # Derived Tier B feature from Tier A snapshot.
+        features["book_imbalance"] = FeatureValue(
+            name="book_imbalance",
+            value=float(dom_snapshot.book_imbalance),
+            tier="DERIVED",
+            source=f"{dom_check.get('provider', 'unknown')}_l2",
+            can_affect_decisions=True,
+            render_anchors=[],
+        )
     else:
-        # Synthetic DOM - CANNOT affect decisions
-        synthetic_dom = get_synthetic_dom_watermarked(symbol, recent_bars)
+        # No qualified real DOM snapshot available (Tier C display only).
         features["simulated_dom"] = FeatureValue(
             name="simulated_dom",
-            value=synthetic_dom,
+            value=dom_snapshot.to_dict() if dom_snapshot else {"bids": [], "asks": [], "watermark": "SYNTHETIC / EDUCATIONAL ONLY"},
             tier="SYNTHETIC",
-            source="candle_estimation",
+            source=str(dom_check.get("provider") or "no_dom"),
             can_affect_decisions=False,
-            render_anchors=[]
+            render_anchors=[],
         )
-    
-    # Determine decision based on real data availability
-    real_features = {k: v for k, v in features.items() if v.can_affect_decisions}
-    has_real_data = len(real_features) > 0
-    
-    # Check for conflicts
+
+    # Provenance firewall registration (per decision packet).
+    provenance_firewall.reset()
+    for feat_name, feat in features.items():
+        tagged = create_tagged_feature(
+            name=feat_name,
+            value=feat.value,
+            source=feat.source,
+            highlight_anchors=[a.to_dict() for a in feat.render_anchors],
+        )
+        provenance_firewall.register_feature(tagged)
+
+    # Confidence is computed with Tier A/B in numerator; Tier C can only dilute (never inflate).
+    confidence = provenance_firewall.compute_confidence({k: v.value for k, v in features.items()})
+    has_tier_ab_features = len(provenance_firewall.get_decision_features()) > 0
+
+    # Advisory conflict detection from Tier C-only signals (must not gate trading).
     conflict_info = None
-    reason_codes = []
-    evidence_pins = []
-    resolution_conditions = []
-    
-    if not has_real_data:
-        reason_codes.append(ReasonCode.NO_REAL_DATA)
-        evidence_pins.append({
-            "pin_id": "no_real_data",
-            "text": "No real order flow data available",
-            "type": "warning",
-            "bar_index": bar_index,
-            "price": bars[-1]["close"]
-        })
-        resolution_conditions.append({
-            "condition": "Connect to real L2 feed (REAL_DOM=true)",
-            "type": "requirement",
-            "anchors": []
-        })
-    
-    # Check for signal conflicts (Volume vs Delta)
+    synthetic_conflict = None
     vp_signal = "BULLISH" if vp.get("poc", 0) < bars[-1]["close"] else "BEARISH"
     delta_signal = "BULLISH" if delta_data and delta_data[-1].get("cumulative_delta", 0) > 0 else "BEARISH"
-    
     if vp_signal != delta_signal:
+        poc = float(vp.get("poc", bars[-1]["close"]))
         conflict_info = ConflictInfo(
-            conflict_type="VOLUME_DELTA_CONFLICT",
-            signals_in_conflict=["Volume Profile", "Delta Flow"],
+            conflict_type="SYNTHETIC_VP_DELTA_CONFLICT",
+            signals_in_conflict=["Volume Profile (Tier C)", "Delta Flow (Tier C)"],
             resolution_conditions=[
-                f"WAIT until Volume Profile and Delta align",
-                f"Volume says {vp_signal}, Delta says {delta_signal}"
+                "Advisory: synthetic signals disagree (Tier C).",  # Tier C cannot gate trading
+                f"Volume says {vp_signal}, Delta says {delta_signal}",
             ],
             resolution_anchors=[
                 RenderAnchor(
                     anchor_type="level",
-                    price_low=vp.get("poc", 0),
-                    price_high=vp.get("poc", 0),
-                    description="POC level - watch for acceptance"
+                    price_low=poc,
+                    price_high=poc,
+                    description="POC level (synthetic) for context",
                 )
-            ]
+            ],
         )
-        reason_codes.append(ReasonCode.CONFLICTING_SIGNALS)
-        evidence_pins.append({
-            "pin_id": "conflict_vp_delta",
-            "text": f"CONFLICT: Volume={vp_signal}, Delta={delta_signal}",
-            "type": "conflict",
-            "bar_index": bar_index,
-            "price": vp.get("poc", bars[-1]["close"])
-        })
-        resolution_conditions.append({
-            "condition": f"Wait for {vp_signal} confirmation above POC" if vp_signal == "BULLISH" else f"Wait for {vp_signal} confirmation below POC",
-            "type": "resolution",
-            "anchors": [{"price": vp.get("poc", 0), "type": "level"}]
-        })
-    
-    # Create packet
-    decision = DecisionType.CONFLICT if conflict_info else (
-        DecisionType.WAIT if not has_real_data else DecisionType.TRADE
+        synthetic_conflict = {
+            "signal_a": f"VP: {vp_signal}",
+            "signal_b": f"Delta: {delta_signal}",
+            "weight_a": 1.0,
+            "weight_b": 1.0,
+            "resolution": "cancelled_out",
+            "zone": {"price_low": poc, "price_high": poc},
+        }
+
+    # Decision (fail-closed): REAL_DOM policy + firewall gates.
+    reason_codes_set = set()
+    if state.kill_switch_active:
+        decision = DecisionType.SKIP
+        reason_codes_set.add(ReasonCode.KILL_SWITCH_ACTIVE)
+    else:
+        dom_allowed = bool(dom_check.get("allowed", False))
+        min_conf = 60.0
+        can_trade = dom_allowed and provenance_firewall.can_trade(confidence=confidence, min_confidence=min_conf)
+        if can_trade:
+            decision = DecisionType.TRADE
+            reason_codes_set.add(ReasonCode.REAL_DATA_CONFIRMS)
+        else:
+            decision = DecisionType.WAIT
+            if not has_tier_ab_features:
+                reason_codes_set.add(ReasonCode.NO_REAL_DATA)
+                reason_codes_set.add(ReasonCode.SYNTHETIC_ONLY)
+            if not dom_allowed:
+                reason_codes_set.add(ReasonCode.INSUFFICIENT_REAL_DATA)
+            if has_tier_ab_features and confidence < min_conf:
+                reason_codes_set.add(ReasonCode.BELOW_CONFIDENCE_THRESHOLD)
+            if synthetic_conflict:
+                reason_codes_set.add(ReasonCode.CONFLICTING_SIGNALS)
+
+    # WhyWait pins + conflict map (rendered by frontend; must be clickable).
+    why_wait = generate_why_wait(
+        bar_index=bar_index,
+        dom_check=dom_check,
+        has_tier_ab_features=has_tier_ab_features,
+        synthetic_conflict=synthetic_conflict,
+        current_price=bars[-1]["close"],
     )
-    
-    confidence = len(real_features) / max(len(features), 1) * 100
-    
-    reason_text = "WAIT: " + ", ".join([r.value for r in reason_codes]) if reason_codes else "Ready to trade"
+    evidence_pins = [p.to_dict() for p in why_wait.top_pins(limit=3)]
+    conflict_map = [c.to_dict() for c in why_wait.conflict_map]
+    resolution_conditions = [
+        {"condition": c, "type": "requirement", "anchors": []} for c in why_wait.missing_conditions
+    ]
+
+    reason_codes = sorted(reason_codes_set, key=lambda r: r.value)
+    reason_text = (
+        (f"{decision.value}: " + ", ".join([r.value for r in reason_codes]))
+        if reason_codes
+        else ("Ready to trade" if decision == DecisionType.TRADE else "WAIT: No reasons")
+    )
     
     packet = WeavePacket(
         packet_id="",
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         symbol=symbol,
         timeframe="1H",
         bar_index=bar_index,
@@ -1978,6 +2003,7 @@ def get_weave_packet(symbol: str):
         invalidation_conditions=[],
         invalidation_anchors=[],
         conflict_info=conflict_info,
+        conflict_map=conflict_map,
         evidence_pins=evidence_pins,
         resolution_conditions=resolution_conditions
     )
@@ -2014,46 +2040,59 @@ def get_dom_data(symbol: str):
     Get DOM data with provenance.
     Returns REAL DOM if connected, otherwise SYNTHETIC with watermark.
     """
-    bars = state.price_history.get(symbol, [])
-    
-    # Check for real DOM
-    if dom_manager.is_real_dom_available(symbol):
-        real_dom = dom_manager.get_snapshot(symbol)
-        if real_dom:
-            return {
-                "dom": real_dom.to_dict(),
-                "is_real": True,
-                "provenance_tier": "REAL",
-                "watermark": None,
-                "can_affect_decisions": True
-            }
-    
-    # Return synthetic DOM with watermark
-    synthetic_dom = get_synthetic_dom_watermarked(symbol, bars[-50:] if bars else [])
+    dom_check = market_data_registry.fail_closed_check(symbol)
+    snapshot = market_data_registry.get_snapshot(symbol)
+    if snapshot is not None:
+        return {
+            "dom": snapshot.to_dict(),
+            "is_real": snapshot.is_real,
+            "provenance_tier": "REAL" if snapshot.is_real else "SYNTHETIC",
+            "watermark": None if snapshot.is_real else "SYNTHETIC / EDUCATIONAL ONLY",
+            "can_affect_decisions": bool(snapshot.is_real and dom_check.get("allowed", False)),
+            "dom_check": dom_check,
+        }
+
+    # Default synthetic/empty DOM with watermark
+    synthetic_dom = {
+        "symbol": symbol,
+        "venue": "no_dom",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "bids": [],
+        "asks": [],
+        "spread": 0.0,
+        "mid_price": 0.0,
+        "book_imbalance": 0.0,
+        "total_bid_size": 0.0,
+        "total_ask_size": 0.0,
+        "liquidity_walls": [],
+        "is_real": False,
+        "watermark": "SYNTHETIC / EDUCATIONAL ONLY",
+    }
     return {
         "dom": synthetic_dom,
         "is_real": False,
         "provenance_tier": "SYNTHETIC",
         "watermark": "SYNTHETIC / EDUCATIONAL ONLY",
         "can_affect_decisions": False,
-        "warning": "This DOM is simulated from OHLCV data. DO NOT use for trading decisions."
+        "warning": "No qualified real L2 provider for this instrument. DOM display is educational only.",
+        "dom_check": dom_check,
     }
 
 
 @app.post("/api/real-dom/start/{symbol}")
 async def start_real_dom(symbol: str):
     """Start real DOM feed for a symbol (requires REAL_DOM=true)"""
-    if not dom_manager.real_dom_enabled:
+    if os.environ.get("REAL_DOM", "false").lower() != "true":
         return {
             "success": False,
             "error": "REAL_DOM not enabled. Set REAL_DOM=true environment variable."
         }
     
-    success = await dom_manager.start_feed(symbol)
+    success = await market_data_registry.start(symbol)
     return {
         "success": success,
         "symbol": symbol,
-        "status": dom_manager.get_status()
+        "status": market_data_registry.get_status()
     }
 
 
@@ -2086,18 +2125,20 @@ def get_decision(symbol: str):
             "provenance_check": "FAILED"
         }
     
-    # Check if we can trade (fail-closed)
-    can_trade = dom_manager.fail_closed_check(symbol) if dom_manager.real_dom_enabled else False
+    dom_check = market_data_registry.fail_closed_check(symbol)
+    can_trade = packet_data.get("decision") == "TRADE" and bool(dom_check.get("allowed", False))
     
     return {
         "decision": packet_data.get("decision", "WAIT"),
         "confidence": packet_data.get("confidence", 0),
         "reason": packet_data.get("reason_text", ""),
         "can_trade": can_trade,
-        "provenance_check": "PASSED" if can_trade else "FAILED - No real data",
+        "provenance_check": "PASSED" if can_trade else "FAILED - Fail-closed",
+        "dom_check": dom_check,
         "evidence_pins": packet_data.get("evidence_pins", []),
         "resolution_conditions": packet_data.get("resolution_conditions", []),
         "conflict_info": packet_data.get("conflict_info"),
+        "conflict_map": packet_data.get("conflict_map", []),
         "features_used": {
             k: {
                 "tier": v.get("tier"),

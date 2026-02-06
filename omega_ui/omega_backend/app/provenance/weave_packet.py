@@ -140,6 +140,10 @@ class WeavePacket:
     
     # Conflict info (if in CONFLICT mode)
     conflict_info: Optional[ConflictInfo] = None
+
+    # Conflict map (adapter-level disagreement table; UI renders as a table)
+    # Spec: OMEGA_CODEX_HANDOFF/_claude_zip/CLAUDE EB6 644/WOVEN_SPEC_CHECKLIST.md §3
+    conflict_map: List[Dict[str, Any]] = field(default_factory=list)
     
     # Evidence pins for "Why Wait" display
     evidence_pins: List[Dict[str, Any]] = field(default_factory=list)
@@ -168,6 +172,7 @@ class WeavePacket:
             "invalidation_conditions": self.invalidation_conditions,
             "invalidation_anchors": [a.to_dict() for a in self.invalidation_anchors],
             "conflict_info": self.conflict_info.to_dict() if self.conflict_info else None,
+            "conflict_map": self.conflict_map,
             "evidence_pins": self.evidence_pins,
             "resolution_conditions": self.resolution_conditions
         }
@@ -219,6 +224,7 @@ class WeavePacket:
                 RenderAnchor(**a) for a in data.get("invalidation_anchors", [])
             ],
             conflict_info=conflict_info,
+            conflict_map=data.get("conflict_map", []),
             evidence_pins=data.get("evidence_pins", []),
             resolution_conditions=data.get("resolution_conditions", [])
         )

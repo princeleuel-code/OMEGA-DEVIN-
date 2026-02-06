@@ -9,13 +9,17 @@ Config switch: REAL_DOM=true fails closed if feed not connected.
 
 import asyncio
 import json
-import websockets
 from datetime import datetime
 from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 import os
 import logging
+
+try:
+    import websockets  # type: ignore
+except Exception:  # pragma: no cover
+    websockets = None
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -113,6 +117,10 @@ class BinanceL2Feed:
     
     async def connect(self) -> bool:
         """Connect to Binance websocket"""
+        if websockets is None:
+            self.state = DOMConnectionState.ERROR
+            logger.error("websockets dependency missing; cannot connect real DOM feed")
+            return False
         if self.state == DOMConnectionState.CONNECTED:
             return True
         
@@ -235,11 +243,12 @@ class BinanceL2Feed:
                         except Exception as e:
                             logger.error(f"Callback error: {e}")
                             
-            except websockets.ConnectionClosed:
-                logger.warning("WebSocket connection closed, reconnecting...")
-                self.state = DOMConnectionState.DISCONNECTED
-                await asyncio.sleep(self.reconnect_delay)
             except Exception as e:
+                if websockets is not None and isinstance(e, getattr(websockets, "ConnectionClosed", ())):
+                    logger.warning("WebSocket connection closed, reconnecting...")
+                    self.state = DOMConnectionState.DISCONNECTED
+                    await asyncio.sleep(self.reconnect_delay)
+                    continue
                 logger.error(f"Error in feed loop: {e}")
                 await asyncio.sleep(1)
     
