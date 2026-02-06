@@ -36,6 +36,17 @@ from .delta_print import (
     ValueArea,
     create_delta_print_intelligence,
 )
+from .unified_intelligence import (
+    UnifiedIntelligence,
+    UnifiedAnalysis,
+    UnifiedSignal,
+    VPINAnalysis,
+    RegimeAnalysis,
+    MarketRegimeUnified,
+    InformedTradingLevel,
+    SignalStrength,
+    create_unified_intelligence,
+)
 
 __all__ = [
     # Core consciousness
@@ -85,4 +96,15 @@ __all__ = [
     "VolumeLedge",
     "ValueArea",
     "create_delta_print_intelligence",
+    
+    # Unified Intelligence (THE BREAKTHROUGH)
+    "UnifiedIntelligence",
+    "UnifiedAnalysis",
+    "UnifiedSignal",
+    "VPINAnalysis",
+    "RegimeAnalysis",
+    "MarketRegimeUnified",
+    "InformedTradingLevel",
+    "SignalStrength",
+    "create_unified_intelligence",
 ]
