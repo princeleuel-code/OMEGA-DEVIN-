@@ -1053,6 +1053,273 @@ const UnifiedIntelligence = ({
   );
 };
 
+// BREAKTHROUGH: PREDICTIVE TRADE SETUP - Actionable intelligence with specific levels
+const PredictiveTradeSetup = ({ 
+  volumeProfile, 
+  marketStructure, 
+  orderFlow,
+  delta,
+  currentPrice,
+  symbol
+}: { 
+  volumeProfile: VolumeProfile | null,
+  marketStructure: MarketStructure | null,
+  orderFlow: OrderFlowImbalance | null,
+  delta: any[],
+  currentPrice: number,
+  symbol: string
+}) => {
+  const decimals = symbol === 'XAUUSD' ? 2 : symbol === 'USDJPY' ? 3 : 5;
+  
+  // PREDICTIVE INTELLIGENCE: Calculate optimal trade setup
+  const tradeSetup = useMemo(() => {
+    if (!volumeProfile || !currentPrice) return null;
+    
+    // Analyze all signals for direction
+    let bullishScore = 0;
+    let bearishScore = 0;
+    const reasons: string[] = [];
+    
+    // Volume Profile Analysis
+    if (currentPrice > volumeProfile.vah) {
+      bullishScore += 30;
+      reasons.push('Price broke above Value Area - bullish breakout');
+    } else if (currentPrice < volumeProfile.val) {
+      bearishScore += 30;
+      reasons.push('Price broke below Value Area - bearish breakdown');
+    } else if (currentPrice > volumeProfile.poc) {
+      bullishScore += 15;
+      reasons.push('Price above POC - buyers defending');
+    } else {
+      bearishScore += 15;
+      reasons.push('Price below POC - sellers in control');
+    }
+    
+    // Delta Analysis
+    if (delta && delta.length > 0) {
+      const lastDelta = delta[delta.length - 1]?.cumulative_delta || 0;
+      const prevDelta = delta[Math.max(0, delta.length - 10)]?.cumulative_delta || 0;
+      const deltaTrend = lastDelta - prevDelta;
+      
+      if (deltaTrend > 2000) {
+        bullishScore += 35;
+        reasons.push('Strong delta divergence - institutional buying detected');
+      } else if (deltaTrend < -2000) {
+        bearishScore += 35;
+        reasons.push('Strong delta divergence - institutional selling detected');
+      } else if (deltaTrend > 500) {
+        bullishScore += 15;
+        reasons.push('Positive delta flow - buying pressure');
+      } else if (deltaTrend < -500) {
+        bearishScore += 15;
+        reasons.push('Negative delta flow - selling pressure');
+      }
+    }
+    
+    // Order Flow Analysis
+    if (orderFlow) {
+      if (orderFlow.ofi_normalized > 0.6) {
+        bullishScore += 25;
+        reasons.push('Heavy order flow imbalance - aggressive buyers');
+      } else if (orderFlow.ofi_normalized < -0.6) {
+        bearishScore += 25;
+        reasons.push('Heavy order flow imbalance - aggressive sellers');
+      }
+    }
+    
+    // Market Structure Analysis
+    if (marketStructure) {
+      if (marketStructure.structure === 'BULLISH') {
+        bullishScore += 20;
+        reasons.push('Higher highs and higher lows - uptrend confirmed');
+      } else if (marketStructure.structure === 'BEARISH') {
+        bearishScore += 20;
+        reasons.push('Lower highs and lower lows - downtrend confirmed');
+      }
+    }
+    
+    // Calculate confidence and direction
+    const totalScore = bullishScore + bearishScore;
+    const confidence = totalScore > 0 ? Math.max(bullishScore, bearishScore) : 0;
+    const direction = bullishScore > bearishScore ? 'LONG' : bearishScore > bullishScore ? 'SHORT' : 'NEUTRAL';
+    
+    // Calculate optimal entry, stop, and targets based on Volume Profile
+    let entry = currentPrice;
+    let stopLoss = 0;
+    let target1 = 0;
+    let target2 = 0;
+    
+    if (direction === 'LONG') {
+      entry = Math.min(currentPrice, volumeProfile.poc + (volumeProfile.vah - volumeProfile.poc) * 0.3);
+      stopLoss = volumeProfile.val - (volumeProfile.vah - volumeProfile.val) * 0.1;
+      target1 = volumeProfile.vah;
+      target2 = volumeProfile.vah + (volumeProfile.vah - volumeProfile.poc) * 0.5;
+    } else if (direction === 'SHORT') {
+      entry = Math.max(currentPrice, volumeProfile.poc - (volumeProfile.poc - volumeProfile.val) * 0.3);
+      stopLoss = volumeProfile.vah + (volumeProfile.vah - volumeProfile.val) * 0.1;
+      target1 = volumeProfile.val;
+      target2 = volumeProfile.val - (volumeProfile.poc - volumeProfile.val) * 0.5;
+    }
+    
+    const risk = Math.abs(entry - stopLoss);
+    const reward1 = Math.abs(target1 - entry);
+    const riskReward1 = risk > 0 ? reward1 / risk : 0;
+    
+    // Smart Money Detection
+    const smartMoneySignals: string[] = [];
+    if (delta && delta.length > 5) {
+      const recentDeltas = delta.slice(-5);
+      const avgDelta = recentDeltas.reduce((sum: number, d: any) => sum + Math.abs(d.delta || 0), 0) / 5;
+      if (avgDelta > 1000) {
+        smartMoneySignals.push('High volume activity - institutions active');
+      }
+    }
+    
+    if (volumeProfile.hvn_prices && volumeProfile.hvn_prices.length > 0) {
+      const nearHVN = volumeProfile.hvn_prices.some((hvn: number) => Math.abs(currentPrice - hvn) < (volumeProfile.vah - volumeProfile.val) * 0.1);
+      if (nearHVN) {
+        smartMoneySignals.push('Price at High Volume Node - potential support/resistance');
+      }
+    }
+    
+    return {
+      direction,
+      confidence,
+      entry,
+      stopLoss,
+      target1,
+      target2,
+      riskReward1,
+      reasons,
+      smartMoneySignals,
+      isHighProbability: confidence >= 60 && riskReward1 >= 1.5
+    };
+  }, [volumeProfile, marketStructure, orderFlow, delta, currentPrice]);
+  
+  if (!tradeSetup || tradeSetup.direction === 'NEUTRAL') {
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-slate-500 p-4">
+        <Eye className="w-8 h-8 mb-2 opacity-50" />
+        <div className="text-sm font-medium">Analyzing Market...</div>
+        <div className="text-xs mt-1">Waiting for high probability setup</div>
+      </div>
+    );
+  }
+  
+  const isLong = tradeSetup.direction === 'LONG';
+  const directionIcon = isLong ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />;
+  
+  return (
+    <div className="h-full flex flex-col space-y-2 overflow-auto p-1">
+      {/* TRADE SIGNAL HEADER */}
+      <div className={`bg-gradient-to-r ${isLong ? 'from-emerald-500/20 to-cyan-500/20 border-emerald-500/50' : 'from-red-500/20 to-orange-500/20 border-red-500/50'} rounded-lg p-3 border`}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className={`p-2 rounded-lg ${isLong ? 'bg-emerald-500' : 'bg-red-500'}`}>
+              {directionIcon}
+            </div>
+            <div>
+              <div className={`text-lg font-black ${isLong ? 'text-emerald-400' : 'text-red-400'}`}>
+                {tradeSetup.direction}
+              </div>
+              <div className="text-xs text-slate-400">
+                {tradeSetup.isHighProbability ? 'HIGH PROBABILITY' : 'MODERATE'} SETUP
+              </div>
+            </div>
+          </div>
+          <div className="text-right">
+            <div className={`text-2xl font-black ${isLong ? 'text-emerald-400' : 'text-red-400'}`}>
+              {tradeSetup.confidence}%
+            </div>
+            <div className="text-xs text-slate-400">Confidence</div>
+          </div>
+        </div>
+      </div>
+      
+      {/* TRADE LEVELS */}
+      <div className="bg-[#0f1420] rounded-lg p-3 border border-slate-700">
+        <div className="flex items-center gap-2 mb-3">
+          <Target className="w-4 h-4 text-cyan-400" />
+          <span className="text-xs font-bold text-slate-300">TRADE LEVELS</span>
+        </div>
+        
+        <div className="space-y-2">
+          <div className="flex items-center justify-between p-2 rounded bg-slate-800/50">
+            <div className="flex items-center gap-2">
+              <Crosshair className="w-4 h-4 text-cyan-400" />
+              <span className="text-xs text-slate-300">Entry</span>
+            </div>
+            <span className="text-sm font-bold text-cyan-400">{tradeSetup.entry.toFixed(decimals)}</span>
+          </div>
+          
+          <div className="flex items-center justify-between p-2 rounded bg-red-500/10 border border-red-500/30">
+            <div className="flex items-center gap-2">
+              <Shield className="w-4 h-4 text-red-400" />
+              <span className="text-xs text-slate-300">Stop Loss</span>
+            </div>
+            <span className="text-sm font-bold text-red-400">{tradeSetup.stopLoss.toFixed(decimals)}</span>
+          </div>
+          
+          <div className="flex items-center justify-between p-2 rounded bg-emerald-500/10 border border-emerald-500/30">
+            <div className="flex items-center gap-2">
+              <Target className="w-4 h-4 text-emerald-400" />
+              <span className="text-xs text-slate-300">Target 1</span>
+            </div>
+            <div className="text-right">
+              <span className="text-sm font-bold text-emerald-400">{tradeSetup.target1.toFixed(decimals)}</span>
+              <span className="text-xs text-slate-500 ml-2">R:R {tradeSetup.riskReward1.toFixed(1)}</span>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {/* SMART MONEY SIGNALS */}
+      {tradeSetup.smartMoneySignals.length > 0 && (
+        <div className="bg-[#0f1420] rounded-lg p-3 border border-yellow-500/30">
+          <div className="flex items-center gap-2 mb-2">
+            <Zap className="w-4 h-4 text-yellow-400" />
+            <span className="text-xs font-bold text-yellow-400">SMART MONEY DETECTED</span>
+          </div>
+          <div className="space-y-1">
+            {tradeSetup.smartMoneySignals.map((signal, idx) => (
+              <div key={idx} className="text-xs text-slate-300 flex items-center gap-2">
+                <div className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
+                {signal}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      
+      {/* REASONING */}
+      <div className="bg-[#0f1420] rounded-lg p-3 border border-slate-700 flex-1">
+        <div className="flex items-center gap-2 mb-2">
+          <Brain className="w-4 h-4 text-purple-400" />
+          <span className="text-xs font-bold text-slate-300">WHY THIS TRADE</span>
+        </div>
+        <div className="space-y-1">
+          {tradeSetup.reasons.slice(0, 4).map((reason, idx) => (
+            <div key={idx} className={`text-xs p-1.5 rounded ${isLong ? 'bg-emerald-500/5 border-l-2 border-emerald-500' : 'bg-red-500/5 border-l-2 border-red-500'}`}>
+              {reason}
+            </div>
+          ))}
+        </div>
+      </div>
+      
+      {/* NARRATIVE */}
+      <div className={`p-3 rounded-lg ${isLong ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
+        <div className="text-xs text-slate-300 leading-relaxed">
+          <span className={`font-bold ${isLong ? 'text-emerald-400' : 'text-red-400'}`}>NARRATIVE: </span>
+          {isLong 
+            ? `Institutional buying detected with ${tradeSetup.confidence}% confidence. Enter LONG at ${tradeSetup.entry.toFixed(decimals)} with stop at ${tradeSetup.stopLoss.toFixed(decimals)}. Target ${tradeSetup.target1.toFixed(decimals)} for ${tradeSetup.riskReward1.toFixed(1)}R.`
+            : `Institutional selling detected with ${tradeSetup.confidence}% confidence. Enter SHORT at ${tradeSetup.entry.toFixed(decimals)} with stop at ${tradeSetup.stopLoss.toFixed(decimals)}. Target ${tradeSetup.target1.toFixed(decimals)} for ${tradeSetup.riskReward1.toFixed(1)}R.`
+          }
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const DeltaProfileChart = ({ data, symbol }: { data: VolumeProfile | null, symbol: string }) => {
   if (!data || !data.levels || data.levels.length === 0) {
     return (
@@ -1125,7 +1392,7 @@ function App() {
   const [selectedSymbol, setSelectedSymbol] = useState('EURUSD');
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [isConnected, setIsConnected] = useState(false);
-  const [activeTab, setActiveTab] = useState<'brain' | 'orderflow' | 'levels' | 'risk'>('brain');
+  const [activeTab, setActiveTab] = useState<'brain' | 'setup' | 'orderflow' | 'levels' | 'risk'>('brain');
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
   const symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'XAUUSD'];
@@ -1490,16 +1757,24 @@ function App() {
 
                 <div className="col-span-3 space-y-4">
                   <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-1 flex flex-wrap">
-                    <button
-                      onClick={() => setActiveTab('brain')}
-                      className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
-                        activeTab === 'brain' ? 'bg-gradient-to-r from-cyan-500/30 to-purple-500/30 text-white border border-cyan-500/50' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <Brain className="w-3 h-3" /> Brain
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('orderflow')}
+                                        <button
+                                          onClick={() => setActiveTab('brain')}
+                                          className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
+                                            activeTab === 'brain' ? 'bg-gradient-to-r from-cyan-500/30 to-purple-500/30 text-white border border-cyan-500/50' : 'text-slate-400 hover:text-white'
+                                          }`}
+                                        >
+                                          <Brain className="w-3 h-3" /> Brain
+                                        </button>
+                                        <button
+                                          onClick={() => setActiveTab('setup')}
+                                          className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
+                                            activeTab === 'setup' ? 'bg-gradient-to-r from-emerald-500/30 to-cyan-500/30 text-white border border-emerald-500/50' : 'text-slate-400 hover:text-white'
+                                          }`}
+                                        >
+                                          <Target className="w-3 h-3" /> Setup
+                                        </button>
+                                        <button
+                                          onClick={() => setActiveTab('orderflow')}
                       className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
                         activeTab === 'orderflow' ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-white' : 'text-slate-400 hover:text-white'
                       }`}
@@ -1524,21 +1799,34 @@ function App() {
                     </button>
                   </div>
 
-                  {activeTab === 'brain' && (
-                    <div className="h-[calc(100%-50px)]">
-                      <UnifiedIntelligence
-                        volumeProfile={chartData?.volume_profile || null}
-                        orderFlow={chartData?.order_flow_imbalance || null}
-                        marketStructure={chartData?.market_structure || null}
-                        riskMetrics={chartData?.risk_metrics || null}
-                        delta={chartData?.delta || []}
-                        currentPrice={chartData?.current_price || 0}
-                        symbol={selectedSymbol}
-                      />
-                    </div>
-                  )}
+                                    {activeTab === 'brain' && (
+                                      <div className="h-[calc(100%-50px)]">
+                                        <UnifiedIntelligence
+                                          volumeProfile={chartData?.volume_profile || null}
+                                          orderFlow={chartData?.order_flow_imbalance || null}
+                                          marketStructure={chartData?.market_structure || null}
+                                          riskMetrics={chartData?.risk_metrics || null}
+                                          delta={chartData?.delta || []}
+                                          currentPrice={chartData?.current_price || 0}
+                                          symbol={selectedSymbol}
+                                        />
+                                      </div>
+                                    )}
 
-                  {activeTab === 'orderflow' && (
+                                    {activeTab === 'setup' && (
+                                      <div className="h-[calc(100%-50px)]">
+                                        <PredictiveTradeSetup
+                                          volumeProfile={chartData?.volume_profile || null}
+                                          orderFlow={chartData?.order_flow_imbalance || null}
+                                          marketStructure={chartData?.market_structure || null}
+                                          delta={chartData?.delta || []}
+                                          currentPrice={chartData?.current_price || 0}
+                                          symbol={selectedSymbol}
+                                        />
+                                      </div>
+                                    )}
+
+                                    {activeTab === 'orderflow' && (
             <>
               <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
                 <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
