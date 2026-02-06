@@ -1829,6 +1829,41 @@ interface RealFVG {
   description: string;
 }
 
+interface DOMLevel {
+  price: number;
+  size: number;
+  is_large: boolean;
+}
+
+interface DOMLadder {
+  bids: DOMLevel[];
+  asks: DOMLevel[];
+  spread: number;
+  mid_price: number;
+  liquidity_walls: DOMLevel[];
+  total_bid_liquidity: number;
+  total_ask_liquidity: number;
+  imbalance: number;
+}
+
+interface FootprintPattern {
+  bar_index: number;
+  type: string;
+  direction: string;
+  price: number;
+  description: string;
+}
+
+interface MarketProfile {
+  tpo_levels: any[];
+  poc: number;
+  value_area_high: number;
+  value_area_low: number;
+  total_tpo: number;
+  price_high: number;
+  price_low: number;
+}
+
 interface FootprintData {
   candles: FootprintCandle[];
   cumulative_delta: number;
@@ -1841,30 +1876,33 @@ interface FootprintData {
   cvd_values?: any[];
   heatmap?: any;
   volume_profile?: any;
+  dom_ladder?: DOMLadder;
+  footprint_patterns?: FootprintPattern[];
+  market_profile?: MarketProfile;
 }
 
 const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbol: string }) => {
   const decimals = symbol === 'XAUUSD' ? 2 : symbol === 'USDJPY' ? 3 : 5;
-  const [viewMode, setViewMode] = useState<'footprint' | 'signals' | 'heatmap'>('footprint');
+  const [viewMode, setViewMode] = useState<'footprint' | 'signals' | 'dom' | 'patterns'>('footprint');
   
   if (!data || !data.candles || data.candles.length === 0) {
     return (
-      <div className="h-full flex items-center justify-center text-slate-500">
+      <div className="h-full flex items-center justify-center text-slate-500 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900">
         <Activity className="w-6 h-6 animate-pulse mr-2" />
-        Loading DeepCharts...
+        Loading DeepCharts ULTRA...
       </div>
     );
   }
 
-  // Get last 12 candles for display
-  const displayCandles = data.candles.slice(-12);
-  const startIdx = data.candles.length - 12;
+  // Get last 10 candles for display
+  const displayCandles = data.candles.slice(-10);
+  const startIdx = Math.max(0, data.candles.length - 10);
   
   // Calculate price range across all candles
   const allPrices = displayCandles.flatMap(c => [c.high, c.low]);
   const priceHigh = Math.max(...allPrices);
   const priceLow = Math.min(...allPrices);
-  const priceRange = priceHigh - priceLow;
+  const priceRange = priceHigh - priceLow || 0.0001;
   
   // Find max volume for scaling
   const maxVol = Math.max(...displayCandles.flatMap(c => c.price_levels.map(l => Math.max(l.buy_volume, l.sell_volume))));
@@ -1881,6 +1919,9 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
   const visibleDivergences = (data.cvd_divergences || []).filter(d => d.bar_index >= startIdx);
   const visibleDeepTrades = (data.deep_trades || []).filter(t => t.bar_index >= startIdx);
   const realFVGs = data.real_fvgs || [];
+  const domLadder = data.dom_ladder;
+  const footprintPatterns = data.footprint_patterns || [];
+  const marketProfile = data.market_profile;
 
   // Count signals
   const bullishSignals = visibleAbsorptions.filter(a => a.type === 'BULLISH').length + 
@@ -1890,81 +1931,137 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
                          visibleDivergences.filter(d => d.type === 'BEARISH').length +
                          visibleDeepTrades.filter(t => t.type === 'SELL').length;
 
+  // CVD values for mini chart
+  const cvdValues = data.cvd_values || [];
+  const cvdMin = Math.min(...cvdValues.map((v: any) => v.cvd));
+  const cvdMax = Math.max(...cvdValues.map((v: any) => v.cvd));
+  const cvdRange = cvdMax - cvdMin || 1;
+
   return (
-    <div className="h-full flex flex-col bg-slate-900 rounded-lg overflow-hidden">
-      {/* Header with DeepCharts branding */}
-      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700 bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900">
+    <div className="h-full flex flex-col bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 rounded-lg overflow-hidden shadow-2xl border border-slate-700/50">
+      {/* Header with DeepCharts ULTRA branding */}
+      <div className="flex items-center justify-between px-3 py-2 border-b border-slate-700/50 bg-gradient-to-r from-cyan-900/20 via-purple-900/20 to-cyan-900/20">
         <div className="flex items-center gap-2">
-          <Layers className="w-4 h-4 text-cyan-400" />
-          <span className="text-sm font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">DeepCharts PRO</span>
-          <span className="text-xs text-slate-400">{symbol}</span>
+          <div className="relative">
+            <Layers className="w-5 h-5 text-cyan-400" />
+            <div className="absolute -top-1 -right-1 w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+          </div>
+          <span className="text-sm font-black bg-gradient-to-r from-cyan-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+            DeepCharts ULTRA
+          </span>
+          <span className="text-[10px] px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded font-medium">{symbol}</span>
         </div>
         <div className="flex items-center gap-2">
-          {/* View mode toggle */}
-          <div className="flex bg-slate-800 rounded-lg p-0.5">
+          {/* View mode toggle - BEST IN WORLD */}
+          <div className="flex bg-slate-800/80 rounded-lg p-0.5 shadow-inner">
             <button 
               onClick={() => setViewMode('footprint')}
-              className={`px-2 py-1 text-[10px] rounded ${viewMode === 'footprint' ? 'bg-cyan-500/30 text-cyan-400' : 'text-slate-400'}`}
+              className={`px-2 py-1 text-[9px] rounded font-medium transition-all ${viewMode === 'footprint' ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
             >
               Footprint
             </button>
             <button 
+              onClick={() => setViewMode('dom')}
+              className={`px-2 py-1 text-[9px] rounded font-medium transition-all ${viewMode === 'dom' ? 'bg-gradient-to-r from-emerald-500 to-emerald-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+            >
+              DOM
+            </button>
+            <button 
+              onClick={() => setViewMode('patterns')}
+              className={`px-2 py-1 text-[9px] rounded font-medium transition-all ${viewMode === 'patterns' ? 'bg-gradient-to-r from-purple-500 to-purple-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
+            >
+              Patterns
+            </button>
+            <button 
               onClick={() => setViewMode('signals')}
-              className={`px-2 py-1 text-[10px] rounded ${viewMode === 'signals' ? 'bg-purple-500/30 text-purple-400' : 'text-slate-400'}`}
+              className={`px-2 py-1 text-[9px] rounded font-medium transition-all ${viewMode === 'signals' ? 'bg-gradient-to-r from-pink-500 to-pink-600 text-white shadow-lg' : 'text-slate-400 hover:text-white'}`}
             >
               Signals
             </button>
           </div>
-          <span className={`font-bold text-xs ${data.cumulative_delta > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+          <div className={`px-2 py-1 rounded font-bold text-xs ${data.cumulative_delta > 0 ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'}`}>
             CVD: {data.cumulative_delta > 0 ? '+' : ''}{formatVol(data.cumulative_delta)}
-          </span>
+          </div>
         </div>
       </div>
 
-      {/* Signal Summary Bar */}
-      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800/50 border-b border-slate-700 text-[10px]">
+      {/* Signal Summary Bar - Enhanced */}
+      <div className="flex items-center justify-between px-3 py-1.5 bg-slate-800/30 border-b border-slate-700/30 text-[10px]">
         <div className="flex items-center gap-3">
-          <span className="text-emerald-400">
-            <TrendingUp className="w-3 h-3 inline mr-1" />
-            {bullishSignals} Bullish
+          <span className="flex items-center gap-1 text-emerald-400">
+            <TrendingUp className="w-3 h-3" />
+            <span className="font-bold">{bullishSignals}</span> Bull
           </span>
-          <span className="text-red-400">
-            <TrendingDown className="w-3 h-3 inline mr-1" />
-            {bearishSignals} Bearish
+          <span className="flex items-center gap-1 text-red-400">
+            <TrendingDown className="w-3 h-3" />
+            <span className="font-bold">{bearishSignals}</span> Bear
           </span>
+          {marketProfile && (
+            <span className="flex items-center gap-1 text-yellow-400">
+              <Target className="w-3 h-3" />
+              POC: {marketProfile.poc.toFixed(decimals)}
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {visibleAbsorptions.length > 0 && (
-            <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded">
-              {visibleAbsorptions.length} Absorption
+            <span className="px-1.5 py-0.5 bg-yellow-500/20 text-yellow-400 rounded text-[9px] font-medium">
+              {visibleAbsorptions.length} Absorb
             </span>
           )}
           {visibleDivergences.length > 0 && (
-            <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded">
-              {visibleDivergences.length} CVD Div
+            <span className="px-1.5 py-0.5 bg-purple-500/20 text-purple-400 rounded text-[9px] font-medium">
+              {visibleDivergences.length} Div
             </span>
           )}
           {visibleDeepTrades.length > 0 && (
-            <span className="px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded">
+            <span className="px-1.5 py-0.5 bg-cyan-500/20 text-cyan-400 rounded text-[9px] font-medium">
               {visibleDeepTrades.length} Whale
+            </span>
+          )}
+          {footprintPatterns.length > 0 && (
+            <span className="px-1.5 py-0.5 bg-pink-500/20 text-pink-400 rounded text-[9px] font-medium">
+              {footprintPatterns.length} Pattern
             </span>
           )}
         </div>
       </div>
       
       {viewMode === 'footprint' ? (
-        <>
-          {/* Chart Area */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Main Chart Area */}
           <div className="flex-1 flex overflow-x-auto">
-            {/* Price axis */}
-            <div className="w-16 flex flex-col justify-between py-2 px-1 text-xs text-slate-400 border-r border-slate-700">
-              <span>{priceHigh.toFixed(decimals)}</span>
-              <span>{((priceHigh + priceLow) / 2).toFixed(decimals)}</span>
-              <span>{priceLow.toFixed(decimals)}</span>
+            {/* Price axis with POC/VAH/VAL */}
+            <div className="w-20 flex flex-col justify-between py-2 px-1 text-[10px] text-slate-400 border-r border-slate-700/50 bg-slate-800/20 relative">
+              <span className="font-mono">{priceHigh.toFixed(decimals)}</span>
+              {marketProfile && (
+                <>
+                  <div className="absolute right-0 text-[8px] text-yellow-400 font-bold" style={{ top: `${((priceHigh - marketProfile.value_area_high) / priceRange) * 100}%` }}>
+                    VAH
+                  </div>
+                  <div className="absolute right-0 text-[8px] text-cyan-400 font-bold" style={{ top: `${((priceHigh - marketProfile.poc) / priceRange) * 100}%` }}>
+                    POC
+                  </div>
+                  <div className="absolute right-0 text-[8px] text-yellow-400 font-bold" style={{ top: `${((priceHigh - marketProfile.value_area_low) / priceRange) * 100}%` }}>
+                    VAL
+                  </div>
+                </>
+              )}
+              <span className="font-mono">{((priceHigh + priceLow) / 2).toFixed(decimals)}</span>
+              <span className="font-mono">{priceLow.toFixed(decimals)}</span>
             </div>
             
             {/* Candles */}
             <div className="flex-1 flex gap-px p-1 overflow-x-auto relative">
+              {/* POC/VAH/VAL horizontal lines */}
+              {marketProfile && (
+                <>
+                  <div className="absolute left-0 right-0 h-px bg-yellow-500/40 z-10" style={{ top: `${((priceHigh - marketProfile.value_area_high) / priceRange) * 100}%` }} />
+                  <div className="absolute left-0 right-0 h-0.5 bg-cyan-500/60 z-10" style={{ top: `${((priceHigh - marketProfile.poc) / priceRange) * 100}%` }} />
+                  <div className="absolute left-0 right-0 h-px bg-yellow-500/40 z-10" style={{ top: `${((priceHigh - marketProfile.value_area_low) / priceRange) * 100}%` }} />
+                </>
+              )}
+
               {/* Real FVG zones (background) */}
               {realFVGs.slice(0, 3).map((fvg, idx) => {
                 const top = ((priceHigh - fvg.price_high) / priceRange) * 100;
@@ -1973,11 +2070,11 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
                 return (
                   <div
                     key={idx}
-                    className="absolute left-16 right-0 bg-purple-500/10 border-y border-purple-500/30 z-0"
+                    className="absolute left-0 right-0 bg-gradient-to-r from-purple-500/10 to-purple-500/5 border-y border-purple-500/30 z-0"
                     style={{ top: `${top}%`, height: `${Math.max(height, 2)}%` }}
                     title={fvg.description}
                   >
-                    <span className="absolute right-1 top-0 text-[8px] text-purple-400">FVG</span>
+                    <span className="absolute right-1 top-0 text-[7px] text-purple-400 font-bold">FVG</span>
                   </div>
                 );
               })}
@@ -1989,47 +2086,58 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
                 const deepTrade = visibleDeepTrades.find(t => t.bar_index === globalIdx);
                 const absorption = visibleAbsorptions.find(a => a.bar_index === globalIdx);
                 const divergence = visibleDivergences.find(d => d.bar_index === globalIdx);
+                const pattern = footprintPatterns.find(p => p.bar_index === globalIdx);
                 
                 return (
                   <div 
                     key={candleIdx} 
-                    className={`flex-1 min-w-14 flex flex-col border-r border-slate-800 relative ${
-                      candle.is_bullish ? 'bg-emerald-950/20' : 'bg-red-950/20'
+                    className={`flex-1 min-w-12 flex flex-col border-r border-slate-800/50 relative ${
+                      candle.is_bullish ? 'bg-gradient-to-b from-emerald-950/30 to-emerald-950/10' : 'bg-gradient-to-b from-red-950/30 to-red-950/10'
                     } ${hasAbsorption ? 'ring-1 ring-yellow-500/50' : ''} ${hasDivergence ? 'ring-1 ring-purple-500/50' : ''}`}
                   >
+                    {/* Pattern indicator */}
+                    {pattern && (
+                      <div className={`absolute top-1 left-1 z-30 px-1 py-0.5 rounded text-[6px] font-bold ${
+                        pattern.direction === 'BULLISH' ? 'bg-emerald-500 text-white' : 
+                        pattern.direction === 'BEARISH' ? 'bg-red-500 text-white' : 'bg-slate-500 text-white'
+                      }`} title={pattern.description}>
+                        {pattern.type.replace('_', ' ').substring(0, 8)}
+                      </div>
+                    )}
+
                     {/* Deep Trade Bubble */}
                     {deepTrade && (
                       <div 
-                        className={`absolute left-1/2 -translate-x-1/2 z-20 rounded-full flex items-center justify-center text-[8px] font-bold text-white shadow-lg ${
-                          deepTrade.type === 'BUY' ? 'bg-emerald-500' : 'bg-red-500'
+                        className={`absolute left-1/2 -translate-x-1/2 z-20 rounded-full flex items-center justify-center text-[7px] font-bold text-white shadow-lg ring-2 ring-white/30 ${
+                          deepTrade.type === 'BUY' ? 'bg-gradient-to-br from-emerald-400 to-emerald-600' : 'bg-gradient-to-br from-red-400 to-red-600'
                         }`}
                         style={{ 
-                          width: `${Math.max(20, deepTrade.size / 2)}px`, 
-                          height: `${Math.max(20, deepTrade.size / 2)}px`,
-                          top: '30%'
+                          width: `${Math.min(Math.max(18, deepTrade.size / 3), 30)}px`, 
+                          height: `${Math.min(Math.max(18, deepTrade.size / 3), 30)}px`,
+                          top: '25%'
                         }}
                         title={deepTrade.description}
                       >
-                        {deepTrade.multiplier}x
+                        {deepTrade.multiplier.toFixed(1)}x
                       </div>
                     )}
 
                     {/* Absorption marker */}
                     {absorption && (
-                      <div className={`absolute top-0 left-0 right-0 h-1 ${
-                        absorption.type === 'BULLISH' ? 'bg-emerald-400' : 'bg-red-400'
+                      <div className={`absolute top-0 left-0 right-0 h-1.5 ${
+                        absorption.type === 'BULLISH' ? 'bg-gradient-to-r from-emerald-400 to-emerald-500' : 'bg-gradient-to-r from-red-400 to-red-500'
                       }`} title={absorption.description} />
                     )}
 
                     {/* CVD Divergence marker */}
                     {divergence && (
-                      <div className={`absolute bottom-0 left-0 right-0 h-1 ${
-                        divergence.type === 'BULLISH' ? 'bg-purple-400' : 'bg-orange-400'
+                      <div className={`absolute bottom-0 left-0 right-0 h-1.5 ${
+                        divergence.type === 'BULLISH' ? 'bg-gradient-to-r from-purple-400 to-purple-500' : 'bg-gradient-to-r from-orange-400 to-orange-500'
                       }`} title={divergence.description} />
                     )}
 
                     {/* Candle header with delta */}
-                    <div className={`text-center py-0.5 text-[10px] font-bold border-b border-slate-700 ${
+                    <div className={`text-center py-0.5 text-[9px] font-bold border-b border-slate-700/50 ${
                       candle.delta > 0 ? 'text-emerald-400 bg-emerald-500/10' : 'text-red-400 bg-red-500/10'
                     }`}>
                       {candle.delta > 0 ? '+' : ''}{formatVol(candle.delta)}
@@ -2037,7 +2145,7 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
                     
                     {/* Price levels */}
                     <div className="flex-1 flex flex-col-reverse relative">
-                      {candle.price_levels.map((level, levelIdx) => {
+                      {candle.price_levels.slice(0, 6).map((level, levelIdx) => {
                         const buyWidth = maxVol > 0 ? (level.buy_volume / maxVol) * 100 : 0;
                         const sellWidth = maxVol > 0 ? (level.sell_volume / maxVol) * 100 : 0;
                         const isImbalance = level.is_imbalance;
@@ -2045,35 +2153,35 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
                         return (
                           <div 
                             key={levelIdx} 
-                            className={`flex-1 flex items-center justify-center gap-px px-0.5 min-h-3 group relative ${
+                            className={`flex-1 flex items-center justify-center gap-px px-0.5 min-h-2.5 group relative ${
                               isImbalance ? (level.imbalance_type === 'BUY' ? 'bg-emerald-500/20' : 'bg-red-500/20') : ''
                             }`}
                           >
-                            {/* Sell volume (left, orange) */}
+                            {/* Sell volume (left) */}
                             <div 
-                              className={`h-2.5 rounded-l text-xs flex items-center justify-end pr-0.5 ${
+                              className={`h-2 rounded-l text-xs flex items-center justify-end pr-0.5 transition-all ${
                                 isImbalance && level.imbalance_type === 'SELL' 
-                                  ? 'bg-orange-500 text-white font-bold' 
-                                  : 'bg-orange-500/70 text-orange-200'
+                                  ? 'bg-gradient-to-r from-orange-600 to-orange-500 text-white font-bold' 
+                                  : 'bg-orange-500/60 text-orange-200'
                               }`}
-                              style={{ width: `${Math.max(sellWidth, 15)}%`, minWidth: '16px' }}
+                              style={{ width: `${Math.max(sellWidth, 12)}%`, minWidth: '14px' }}
                             >
-                              <span className="text-[8px]">{formatVol(level.sell_volume)}</span>
+                              <span className="text-[7px]">{formatVol(level.sell_volume)}</span>
                             </div>
                             
                             {/* Price indicator */}
-                            <div className="w-px h-full bg-slate-600" />
+                            <div className="w-px h-full bg-slate-600/50" />
                             
-                            {/* Buy volume (right, cyan/green) */}
+                            {/* Buy volume (right) */}
                             <div 
-                              className={`h-2.5 rounded-r text-xs flex items-center justify-start pl-0.5 ${
+                              className={`h-2 rounded-r text-xs flex items-center justify-start pl-0.5 transition-all ${
                                 isImbalance && level.imbalance_type === 'BUY' 
-                                  ? 'bg-cyan-500 text-white font-bold' 
-                                  : 'bg-cyan-500/70 text-cyan-200'
+                                  ? 'bg-gradient-to-r from-cyan-500 to-cyan-600 text-white font-bold' 
+                                  : 'bg-cyan-500/60 text-cyan-200'
                               }`}
-                              style={{ width: `${Math.max(buyWidth, 15)}%`, minWidth: '16px' }}
+                              style={{ width: `${Math.max(buyWidth, 12)}%`, minWidth: '14px' }}
                             >
-                              <span className="text-[8px]">{formatVol(level.buy_volume)}</span>
+                              <span className="text-[7px]">{formatVol(level.buy_volume)}</span>
                             </div>
                             
                             {/* Imbalance indicator */}
@@ -2105,11 +2213,11 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
                       {candle.stacked_imbalances.map((stack, stackIdx) => (
                         <div 
                           key={stackIdx}
-                          className={`absolute left-0 w-1 ${
-                            stack.type === 'BUY' ? 'bg-cyan-400' : 'bg-orange-400'
+                          className={`absolute left-0 w-1 rounded ${
+                            stack.type === 'BUY' ? 'bg-gradient-to-b from-cyan-400 to-cyan-500' : 'bg-gradient-to-b from-orange-400 to-orange-500'
                           }`}
                           style={{
-                            bottom: `${((stack.price_start - priceLow) / priceRange) * 100}%`,
+                            bottom: `${Math.max(0, ((stack.price_start - priceLow) / priceRange) * 100)}%`,
                             height: `${Math.max(Math.abs((stack.price_end - stack.price_start) / priceRange) * 100, 5)}%`
                           }}
                           title={`Stacked ${stack.type} Imbalance (${stack.count} levels)`}
@@ -2118,7 +2226,7 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
                     </div>
                     
                     {/* Candle footer with total volume */}
-                    <div className="text-center py-0.5 text-[8px] text-slate-400 border-t border-slate-700">
+                    <div className="text-center py-0.5 text-[7px] text-slate-400 border-t border-slate-700/50 font-mono">
                       {formatVol(candle.total_volume)}
                     </div>
                   </div>
@@ -2127,45 +2235,207 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
             </div>
           </div>
           
+          {/* CVD Mini Chart */}
+          {cvdValues.length > 0 && (
+            <div className="h-12 border-t border-slate-700/50 bg-slate-800/30 px-2 py-1">
+              <div className="flex items-center justify-between text-[8px] text-slate-400 mb-1">
+                <span>CVD Chart</span>
+                <span className={data.cumulative_delta > 0 ? 'text-emerald-400' : 'text-red-400'}>
+                  {formatVol(data.cumulative_delta)}
+                </span>
+              </div>
+              <svg className="w-full h-6" viewBox="0 0 100 20" preserveAspectRatio="none">
+                <defs>
+                  <linearGradient id="cvdGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+                    <stop offset="0%" stopColor={data.cumulative_delta > 0 ? '#10b981' : '#ef4444'} stopOpacity="0.5" />
+                    <stop offset="100%" stopColor={data.cumulative_delta > 0 ? '#10b981' : '#ef4444'} stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <path
+                  d={`M 0 ${20 - ((cvdValues[0]?.cvd - cvdMin) / cvdRange) * 20} ${cvdValues.slice(-20).map((v: any, i: number) => 
+                    `L ${(i / 19) * 100} ${20 - ((v.cvd - cvdMin) / cvdRange) * 20}`
+                  ).join(' ')} L 100 20 L 0 20 Z`}
+                  fill="url(#cvdGradient)"
+                />
+                <path
+                  d={`M 0 ${20 - ((cvdValues[0]?.cvd - cvdMin) / cvdRange) * 20} ${cvdValues.slice(-20).map((v: any, i: number) => 
+                    `L ${(i / 19) * 100} ${20 - ((v.cvd - cvdMin) / cvdRange) * 20}`
+                  ).join(' ')}`}
+                  fill="none"
+                  stroke={data.cumulative_delta > 0 ? '#10b981' : '#ef4444'}
+                  strokeWidth="1"
+                />
+              </svg>
+            </div>
+          )}
+          
           {/* Legend */}
-          <div className="flex items-center justify-center gap-3 py-1.5 border-t border-slate-700 text-[9px] flex-wrap">
-            <div className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5 bg-cyan-500 rounded" />
+          <div className="flex items-center justify-center gap-2 py-1 border-t border-slate-700/50 text-[8px] flex-wrap bg-slate-800/20">
+            <div className="flex items-center gap-0.5">
+              <div className="w-2 h-2 bg-cyan-500 rounded" />
               <span className="text-slate-400">Buy</span>
             </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2.5 h-2.5 bg-orange-500 rounded" />
+            <div className="flex items-center gap-0.5">
+              <div className="w-2 h-2 bg-orange-500 rounded" />
               <span className="text-slate-400">Sell</span>
             </div>
-            <div className="flex items-center gap-1">
-              <div className="w-4 h-4 bg-emerald-500 rounded-full text-[7px] flex items-center justify-center text-white">W</div>
-              <span className="text-slate-400">Whale Buy</span>
+            <div className="flex items-center gap-0.5">
+              <div className="w-3 h-3 bg-emerald-500 rounded-full text-[6px] flex items-center justify-center text-white">W</div>
+              <span className="text-slate-400">Whale</span>
             </div>
-            <div className="flex items-center gap-1">
-              <div className="w-4 h-4 bg-red-500 rounded-full text-[7px] flex items-center justify-center text-white">W</div>
-              <span className="text-slate-400">Whale Sell</span>
+            <div className="flex items-center gap-0.5">
+              <div className="w-2 h-0.5 bg-yellow-400 rounded" />
+              <span className="text-slate-400">Absorb</span>
             </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-1 bg-yellow-400 rounded" />
-              <span className="text-slate-400">Absorption</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-3 h-1 bg-purple-400 rounded" />
-              <span className="text-slate-400">CVD Div</span>
+            <div className="flex items-center gap-0.5">
+              <div className="w-2 h-0.5 bg-cyan-400 rounded" />
+              <span className="text-slate-400">POC</span>
             </div>
           </div>
-        </>
+        </div>
+      ) : viewMode === 'dom' ? (
+        /* DOM Ladder View - BEST IN WORLD */
+        <div className="flex-1 flex overflow-hidden">
+          {domLadder ? (
+            <>
+              {/* Bids (left side) */}
+              <div className="flex-1 flex flex-col border-r border-slate-700/50">
+                <div className="text-center py-1 text-[10px] font-bold text-emerald-400 bg-emerald-500/10 border-b border-slate-700/50">
+                  BIDS ({formatVol(domLadder.total_bid_liquidity)})
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  {domLadder.bids.map((bid, idx) => {
+                    const maxSize = Math.max(...domLadder.bids.map(b => b.size));
+                    const width = (bid.size / maxSize) * 100;
+                    return (
+                      <div key={idx} className={`flex items-center justify-between px-2 py-1 text-[10px] border-b border-slate-800/50 ${bid.is_large ? 'bg-emerald-500/20' : ''}`}>
+                        <span className="font-mono text-slate-300">{bid.price.toFixed(decimals)}</span>
+                        <div className="flex items-center gap-1">
+                          <div className="w-16 h-2 bg-slate-700 rounded overflow-hidden">
+                            <div className="h-full bg-gradient-to-r from-emerald-600 to-emerald-400 rounded" style={{ width: `${width}%` }} />
+                          </div>
+                          <span className={`font-mono ${bid.is_large ? 'text-emerald-400 font-bold' : 'text-emerald-300'}`}>
+                            {formatVol(bid.size)}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+              
+              {/* Center - Spread & Mid Price */}
+              <div className="w-24 flex flex-col items-center justify-center bg-slate-800/50 border-x border-slate-700/50">
+                <div className="text-[10px] text-slate-400">Spread</div>
+                <div className="text-sm font-bold text-yellow-400">{(domLadder.spread * 10000).toFixed(1)} pips</div>
+                <div className="text-[10px] text-slate-400 mt-2">Mid Price</div>
+                <div className="text-sm font-bold text-white">{domLadder.mid_price.toFixed(decimals)}</div>
+                <div className="text-[10px] text-slate-400 mt-2">Imbalance</div>
+                <div className={`text-sm font-bold ${domLadder.imbalance > 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                  {domLadder.imbalance > 0 ? '+' : ''}{(domLadder.imbalance * 100).toFixed(0)}%
+                </div>
+              </div>
+              
+              {/* Asks (right side) */}
+              <div className="flex-1 flex flex-col">
+                <div className="text-center py-1 text-[10px] font-bold text-red-400 bg-red-500/10 border-b border-slate-700/50">
+                  ASKS ({formatVol(domLadder.total_ask_liquidity)})
+                </div>
+                <div className="flex-1 overflow-y-auto">
+                  {domLadder.asks.map((ask, idx) => {
+                    const maxSize = Math.max(...domLadder.asks.map(a => a.size));
+                    const width = (ask.size / maxSize) * 100;
+                    return (
+                      <div key={idx} className={`flex items-center justify-between px-2 py-1 text-[10px] border-b border-slate-800/50 ${ask.is_large ? 'bg-red-500/20' : ''}`}>
+                        <div className="flex items-center gap-1">
+                          <span className={`font-mono ${ask.is_large ? 'text-red-400 font-bold' : 'text-red-300'}`}>
+                            {formatVol(ask.size)}
+                          </span>
+                          <div className="w-16 h-2 bg-slate-700 rounded overflow-hidden">
+                            <div className="h-full bg-gradient-to-l from-red-600 to-red-400 rounded" style={{ width: `${width}%` }} />
+                          </div>
+                        </div>
+                        <span className="font-mono text-slate-300">{ask.price.toFixed(decimals)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="flex-1 flex items-center justify-center text-slate-500">
+              <Activity className="w-6 h-6 animate-pulse mr-2" />
+              Loading DOM Ladder...
+            </div>
+          )}
+        </div>
+      ) : viewMode === 'patterns' ? (
+        /* Footprint Patterns View - BEST IN WORLD */
+        <div className="flex-1 overflow-y-auto p-2 space-y-2">
+          <div className="text-xs text-slate-400 mb-2">
+            Detected {footprintPatterns.length} footprint patterns
+          </div>
+          
+          {footprintPatterns.length > 0 ? (
+            footprintPatterns.map((pattern, idx) => (
+              <div key={idx} className={`p-2 rounded-lg border ${
+                pattern.direction === 'BULLISH' ? 'bg-emerald-500/10 border-emerald-500/30' :
+                pattern.direction === 'BEARISH' ? 'bg-red-500/10 border-red-500/30' :
+                'bg-slate-500/10 border-slate-500/30'
+              }`}>
+                <div className="flex items-center justify-between mb-1">
+                  <span className={`text-[10px] font-bold ${
+                    pattern.direction === 'BULLISH' ? 'text-emerald-400' :
+                    pattern.direction === 'BEARISH' ? 'text-red-400' : 'text-slate-400'
+                  }`}>
+                    {pattern.type.replace(/_/g, ' ')}
+                  </span>
+                  <span className="text-[9px] text-slate-500">Bar #{pattern.bar_index}</span>
+                </div>
+                <div className="text-[9px] text-slate-400">{pattern.description}</div>
+                <div className="text-[9px] text-slate-500 mt-1">Price: {pattern.price.toFixed(decimals)}</div>
+              </div>
+            ))
+          ) : (
+            <div className="text-center text-slate-500 py-8">
+              <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
+              <div className="text-sm">No patterns detected</div>
+              <div className="text-xs">Waiting for auction patterns...</div>
+            </div>
+          )}
+          
+          {/* Market Profile Summary */}
+          {marketProfile && (
+            <div className="mt-4 p-2 rounded-lg bg-slate-800/50 border border-slate-700/50">
+              <div className="text-[10px] font-bold text-cyan-400 mb-2">Market Profile</div>
+              <div className="grid grid-cols-3 gap-2 text-[9px]">
+                <div>
+                  <div className="text-slate-500">POC</div>
+                  <div className="text-cyan-400 font-mono">{marketProfile.poc.toFixed(decimals)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-500">VAH</div>
+                  <div className="text-yellow-400 font-mono">{marketProfile.value_area_high.toFixed(decimals)}</div>
+                </div>
+                <div>
+                  <div className="text-slate-500">VAL</div>
+                  <div className="text-yellow-400 font-mono">{marketProfile.value_area_low.toFixed(decimals)}</div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       ) : (
         /* Signals View */
         <div className="flex-1 overflow-y-auto p-2 space-y-2">
           {/* Absorptions */}
           {visibleAbsorptions.length > 0 && (
-            <div className="bg-slate-800/50 rounded-lg p-2">
-              <h4 className="text-xs font-bold text-yellow-400 mb-2 flex items-center gap-1">
+            <div className="bg-slate-800/50 rounded-lg p-2 border border-yellow-500/20">
+              <h4 className="text-[10px] font-bold text-yellow-400 mb-2 flex items-center gap-1">
                 <Activity className="w-3 h-3" /> Absorption Patterns
               </h4>
               {visibleAbsorptions.map((a, idx) => (
-                <div key={idx} className={`text-[10px] p-1.5 rounded mb-1 ${
+                <div key={idx} className={`text-[9px] p-1.5 rounded mb-1 ${
                   a.type === 'BULLISH' ? 'bg-emerald-500/10 border-l-2 border-emerald-500' : 'bg-red-500/10 border-l-2 border-red-500'
                 }`}>
                   <div className="font-bold">{a.type} ABSORPTION</div>
@@ -2178,12 +2448,12 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
 
           {/* CVD Divergences */}
           {visibleDivergences.length > 0 && (
-            <div className="bg-slate-800/50 rounded-lg p-2">
-              <h4 className="text-xs font-bold text-purple-400 mb-2 flex items-center gap-1">
+            <div className="bg-slate-800/50 rounded-lg p-2 border border-purple-500/20">
+              <h4 className="text-[10px] font-bold text-purple-400 mb-2 flex items-center gap-1">
                 <TrendingUp className="w-3 h-3" /> CVD Divergences
               </h4>
               {visibleDivergences.map((d, idx) => (
-                <div key={idx} className={`text-[10px] p-1.5 rounded mb-1 ${
+                <div key={idx} className={`text-[9px] p-1.5 rounded mb-1 ${
                   d.type === 'BULLISH' ? 'bg-emerald-500/10 border-l-2 border-emerald-500' : 'bg-red-500/10 border-l-2 border-red-500'
                 }`}>
                   <div className="font-bold">{d.type} DIVERGENCE</div>
@@ -2195,12 +2465,12 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
 
           {/* Deep Trades */}
           {visibleDeepTrades.length > 0 && (
-            <div className="bg-slate-800/50 rounded-lg p-2">
-              <h4 className="text-xs font-bold text-cyan-400 mb-2 flex items-center gap-1">
-                <Zap className="w-3 h-3" /> Whale Trades (Deep Trades)
+            <div className="bg-slate-800/50 rounded-lg p-2 border border-cyan-500/20">
+              <h4 className="text-[10px] font-bold text-cyan-400 mb-2 flex items-center gap-1">
+                <Zap className="w-3 h-3" /> Whale Trades
               </h4>
               {visibleDeepTrades.map((t, idx) => (
-                <div key={idx} className={`text-[10px] p-1.5 rounded mb-1 ${
+                <div key={idx} className={`text-[9px] p-1.5 rounded mb-1 ${
                   t.type === 'BUY' ? 'bg-emerald-500/10 border-l-2 border-emerald-500' : 'bg-red-500/10 border-l-2 border-red-500'
                 }`}>
                   <div className="font-bold">{t.type === 'BUY' ? 'AGGRESSIVE BUYER' : 'AGGRESSIVE SELLER'}</div>
@@ -2213,12 +2483,12 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
 
           {/* Real FVGs */}
           {realFVGs.length > 0 && (
-            <div className="bg-slate-800/50 rounded-lg p-2">
-              <h4 className="text-xs font-bold text-purple-400 mb-2 flex items-center gap-1">
+            <div className="bg-slate-800/50 rounded-lg p-2 border border-purple-500/20">
+              <h4 className="text-[10px] font-bold text-purple-400 mb-2 flex items-center gap-1">
                 <Target className="w-3 h-3" /> Real Fair Value Gaps (LVN)
               </h4>
               {realFVGs.slice(0, 5).map((fvg, idx) => (
-                <div key={idx} className="text-[10px] p-1.5 rounded mb-1 bg-purple-500/10 border-l-2 border-purple-500">
+                <div key={idx} className="text-[9px] p-1.5 rounded mb-1 bg-purple-500/10 border-l-2 border-purple-500">
                   <div className="font-bold">PRECISE REJECTION LEVEL</div>
                   <div className="text-slate-400">{fvg.price_mid.toFixed(decimals)}</div>
                   <div className="text-slate-500">{fvg.description}</div>
@@ -2227,7 +2497,7 @@ const MMTFootprintChart = ({ data, symbol }: { data: FootprintData | null, symbo
             </div>
           )}
 
-          {visibleAbsorptions.length === 0 && visibleDivergences.length === 0 && visibleDeepTrades.length === 0 && (
+          {visibleAbsorptions.length === 0 && visibleDivergences.length === 0 && visibleDeepTrades.length === 0 && realFVGs.length === 0 && (
             <div className="text-center text-slate-500 py-8">
               <Activity className="w-8 h-8 mx-auto mb-2 opacity-50" />
               <div className="text-sm">No signals detected</div>

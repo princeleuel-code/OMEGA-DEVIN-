@@ -1436,6 +1436,248 @@ def generate_footprint_data(bars: List[dict], tick_size: float = 0.0001) -> List
     return footprint_candles
 
 
+def generate_dom_ladder(bars: List[dict], num_levels: int = 10) -> dict:
+    """
+    Generate simulated DOM (Depth of Market) Ladder
+    Shows bid/ask levels with liquidity - BEST IN WORLD feature
+    """
+    if not bars or len(bars) < 1:
+        return {"bids": [], "asks": [], "spread": 0}
+    
+    current_bar = bars[-1]
+    current_price = current_bar["close"]
+    
+    # Estimate spread based on symbol (tighter for majors)
+    avg_range = sum(b["high"] - b["low"] for b in bars[-10:]) / min(10, len(bars))
+    spread = avg_range * 0.01  # 1% of average range
+    
+    bid_price = current_price - spread / 2
+    ask_price = current_price + spread / 2
+    
+    # Generate bid levels (below current price)
+    bids = []
+    for i in range(num_levels):
+        level_price = bid_price - (i * spread * 2)
+        # Simulate liquidity - more at round numbers, less at random levels
+        base_liquidity = 1000 + (i * 200)
+        # Add extra liquidity at "round" levels
+        if abs(level_price * 10000) % 10 < 1:
+            base_liquidity *= 2.5
+        bids.append({
+            "price": round(level_price, 5),
+            "size": int(base_liquidity * (0.8 + 0.4 * np.random.random())),
+            "is_large": base_liquidity > 2000
+        })
+    
+    # Generate ask levels (above current price)
+    asks = []
+    for i in range(num_levels):
+        level_price = ask_price + (i * spread * 2)
+        base_liquidity = 1000 + (i * 200)
+        if abs(level_price * 10000) % 10 < 1:
+            base_liquidity *= 2.5
+        asks.append({
+            "price": round(level_price, 5),
+            "size": int(base_liquidity * (0.8 + 0.4 * np.random.random())),
+            "is_large": base_liquidity > 2000
+        })
+    
+    # Find liquidity walls (large orders)
+    all_levels = bids + asks
+    max_size = max(l["size"] for l in all_levels) if all_levels else 1
+    liquidity_walls = [l for l in all_levels if l["size"] > max_size * 0.7]
+    
+    return {
+        "bids": bids,
+        "asks": asks,
+        "spread": round(spread, 6),
+        "mid_price": round(current_price, 5),
+        "liquidity_walls": liquidity_walls,
+        "total_bid_liquidity": sum(b["size"] for b in bids),
+        "total_ask_liquidity": sum(a["size"] for a in asks),
+        "imbalance": round((sum(b["size"] for b in bids) - sum(a["size"] for a in asks)) / max(1, sum(b["size"] for b in bids) + sum(a["size"] for a in asks)), 2)
+    }
+
+
+def detect_footprint_patterns(candles: List[dict]) -> List[dict]:
+    """
+    Detect advanced footprint patterns - BEST IN WORLD feature
+    - Finished Auction: Strong close at high/low with volume
+    - Unfinished Auction: Weak close, price likely to return
+    - Poor High/Low: Rejection at extremes
+    - Single Prints: Low volume gaps
+    - Excess: Strong rejection with high volume
+    """
+    if not candles or len(candles) < 3:
+        return []
+    
+    patterns = []
+    
+    for i, candle in enumerate(candles):
+        bar_range = candle["high"] - candle["low"]
+        if bar_range <= 0:
+            continue
+            
+        body_size = abs(candle["close"] - candle["open"])
+        body_ratio = body_size / bar_range
+        close_position = (candle["close"] - candle["low"]) / bar_range
+        
+        # Finished Auction (Strong close at extreme)
+        if body_ratio > 0.7 and (close_position > 0.85 or close_position < 0.15):
+            patterns.append({
+                "bar_index": i,
+                "type": "FINISHED_AUCTION",
+                "direction": "BULLISH" if close_position > 0.5 else "BEARISH",
+                "price": candle["close"],
+                "description": f"Strong {'bullish' if close_position > 0.5 else 'bearish'} close - auction complete, trend likely to continue"
+            })
+        
+        # Unfinished Auction (Weak close, doji-like)
+        elif body_ratio < 0.3 and 0.3 < close_position < 0.7:
+            patterns.append({
+                "bar_index": i,
+                "type": "UNFINISHED_AUCTION",
+                "direction": "NEUTRAL",
+                "price": candle["close"],
+                "description": "Weak close - unfinished business, price likely to return to this level"
+            })
+        
+        # Poor High (Rejection at top)
+        upper_wick = candle["high"] - max(candle["open"], candle["close"])
+        if upper_wick > bar_range * 0.4 and candle.get("delta", 0) < 0:
+            patterns.append({
+                "bar_index": i,
+                "type": "POOR_HIGH",
+                "direction": "BEARISH",
+                "price": candle["high"],
+                "description": "Rejection at high - sellers absorbed buyers, potential reversal"
+            })
+        
+        # Poor Low (Rejection at bottom)
+        lower_wick = min(candle["open"], candle["close"]) - candle["low"]
+        if lower_wick > bar_range * 0.4 and candle.get("delta", 0) > 0:
+            patterns.append({
+                "bar_index": i,
+                "type": "POOR_LOW",
+                "direction": "BULLISH",
+                "price": candle["low"],
+                "description": "Rejection at low - buyers absorbed sellers, potential reversal"
+            })
+        
+        # Excess (Strong rejection with high volume)
+        if i > 0:
+            prev_vol = candles[i-1].get("total_volume", 1000)
+            curr_vol = candle.get("total_volume", 1000)
+            if curr_vol > prev_vol * 1.5:
+                if upper_wick > bar_range * 0.5:
+                    patterns.append({
+                        "bar_index": i,
+                        "type": "EXCESS_HIGH",
+                        "direction": "BEARISH",
+                        "price": candle["high"],
+                        "description": "Excess at high - massive rejection with high volume, strong resistance"
+                    })
+                elif lower_wick > bar_range * 0.5:
+                    patterns.append({
+                        "bar_index": i,
+                        "type": "EXCESS_LOW",
+                        "direction": "BULLISH",
+                        "price": candle["low"],
+                        "description": "Excess at low - massive rejection with high volume, strong support"
+                    })
+    
+    return patterns
+
+
+def calculate_market_profile_tpo(bars: List[dict], tpo_size: int = 30) -> dict:
+    """
+    Calculate Market Profile TPO (Time Price Opportunity) - BEST IN WORLD feature
+    Shows time spent at each price level, not just volume
+    """
+    if not bars or len(bars) < 5:
+        return {"tpo_levels": [], "poc": 0, "value_area_high": 0, "value_area_low": 0}
+    
+    # Get price range
+    all_highs = [b["high"] for b in bars]
+    all_lows = [b["low"] for b in bars]
+    price_high = max(all_highs)
+    price_low = min(all_lows)
+    price_range = price_high - price_low
+    
+    if price_range <= 0:
+        return {"tpo_levels": [], "poc": 0, "value_area_high": 0, "value_area_low": 0}
+    
+    # Create TPO levels
+    num_levels = tpo_size
+    level_size = price_range / num_levels
+    tpo_counts = [0] * num_levels
+    
+    # Count time (bars) at each level
+    for bar in bars:
+        for i in range(num_levels):
+            level_low = price_low + (i * level_size)
+            level_high = level_low + level_size
+            
+            # Check if bar touched this level
+            if bar["low"] <= level_high and bar["high"] >= level_low:
+                tpo_counts[i] += 1
+    
+    # Find POC (level with most time)
+    max_tpo = max(tpo_counts)
+    poc_idx = tpo_counts.index(max_tpo)
+    poc_price = price_low + (poc_idx + 0.5) * level_size
+    
+    # Calculate Value Area (70% of TPOs)
+    total_tpo = sum(tpo_counts)
+    target_tpo = total_tpo * 0.70
+    
+    # Expand from POC
+    va_low_idx = poc_idx
+    va_high_idx = poc_idx
+    current_tpo = tpo_counts[poc_idx]
+    
+    while current_tpo < target_tpo and (va_low_idx > 0 or va_high_idx < num_levels - 1):
+        expand_low = tpo_counts[va_low_idx - 1] if va_low_idx > 0 else 0
+        expand_high = tpo_counts[va_high_idx + 1] if va_high_idx < num_levels - 1 else 0
+        
+        if expand_low >= expand_high and va_low_idx > 0:
+            va_low_idx -= 1
+            current_tpo += expand_low
+        elif va_high_idx < num_levels - 1:
+            va_high_idx += 1
+            current_tpo += expand_high
+        else:
+            break
+    
+    va_low = price_low + va_low_idx * level_size
+    va_high = price_low + (va_high_idx + 1) * level_size
+    
+    # Build TPO levels with letters
+    tpo_levels = []
+    for i in range(num_levels):
+        level_low = price_low + (i * level_size)
+        level_high = level_low + level_size
+        tpo_levels.append({
+            "price_low": round(level_low, 5),
+            "price_high": round(level_high, 5),
+            "price_mid": round((level_low + level_high) / 2, 5),
+            "tpo_count": tpo_counts[i],
+            "is_poc": i == poc_idx,
+            "is_value_area": va_low_idx <= i <= va_high_idx,
+            "intensity": tpo_counts[i] / max_tpo if max_tpo > 0 else 0
+        })
+    
+    return {
+        "tpo_levels": tpo_levels,
+        "poc": round(poc_price, 5),
+        "value_area_high": round(va_high, 5),
+        "value_area_low": round(va_low, 5),
+        "total_tpo": total_tpo,
+        "price_high": price_high,
+        "price_low": price_low
+    }
+
+
 @app.get("/api/footprint/{symbol}")
 def get_footprint_data(symbol: str):
     """Get DeepCharts-style advanced footprint chart data with all order flow analysis"""
@@ -1460,6 +1702,15 @@ def get_footprint_data(symbol: str):
     # Calculate volume profile for Real FVG detection
     volume_profile = calculate_volume_profile(recent_bars)
     real_fvgs = find_real_fvg(recent_bars, volume_profile)
+    
+    # BEST IN WORLD: DOM Ladder
+    dom_ladder = generate_dom_ladder(recent_bars)
+    
+    # BEST IN WORLD: Footprint Patterns
+    footprint_patterns = detect_footprint_patterns(footprint_candles)
+    
+    # BEST IN WORLD: Market Profile TPO
+    market_profile = calculate_market_profile_tpo(recent_bars)
     
     # Calculate cumulative delta
     cumulative_delta = sum(c["delta"] for c in footprint_candles)
@@ -1487,5 +1738,9 @@ def get_footprint_data(symbol: str):
         "delta_divergences": delta_divergences,
         "real_fvgs": real_fvgs,
         "cvd_values": cvd_values,
-        "volume_profile": volume_profile
+        "volume_profile": volume_profile,
+        # BEST IN WORLD Features
+        "dom_ladder": dom_ladder,
+        "footprint_patterns": footprint_patterns,
+        "market_profile": market_profile
     }
