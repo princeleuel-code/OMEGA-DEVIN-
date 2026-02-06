@@ -12,6 +12,94 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
+type UnknownRecord = Record<string, unknown>;
+
+interface Candle {
+  timestamp: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number;
+  [k: string]: unknown;
+}
+
+interface VwapPoint {
+  timestamp: string;
+  vwap: number;
+  upper_band_1: number;
+  lower_band_1: number;
+  upper_band_2?: number;
+  lower_band_2?: number;
+  [k: string]: unknown;
+}
+
+interface DeltaPoint {
+  idx: number;
+  delta: number;
+  cumulative_delta: number;
+  is_bullish: boolean;
+  timestamp?: string;
+  [k: string]: unknown;
+}
+
+interface LiquiditySweep {
+  type: string;
+  signal?: string;
+  sweep_price?: number;
+  price?: number;
+  [k: string]: unknown;
+}
+
+interface SwingPoint {
+  price: number;
+  timestamp?: string;
+  type?: string;
+  [k: string]: unknown;
+}
+
+interface BosSignal {
+  type: string;
+  broken_level?: number;
+  current_price?: number;
+  [k: string]: unknown;
+}
+
+interface ClosedTrade {
+  symbol: string;
+  side: 'LONG' | 'SHORT' | string;
+  entry?: number;
+  exit?: number;
+  pnl: number;
+  exit_reason?: string;
+  [k: string]: unknown;
+}
+
+interface UnifiedSignal {
+  name: 'VP' | 'Delta' | 'OFI' | 'Struct';
+  bias: 'BULL' | 'BEAR' | 'NEUT';
+}
+
+interface UnifiedDecision {
+  decision: string;
+  confidence: number;
+  signals: UnifiedSignal[];
+}
+
+interface VpBar {
+  y: number;
+  height: number;
+  totalWidth: number;
+  buyWidth: number;
+  sellWidth: number;
+  neutralWidth: number;
+  isPOC: boolean;
+  isValueArea: boolean;
+  isHVN: boolean;
+  price: number;
+  delta: number;
+}
+
 interface VolumeLevel {
   price_low: number;
   price_high: number;
@@ -47,18 +135,18 @@ interface OrderFlowImbalance {
 }
 
 interface FootprintAnalysis {
-  imbalances: any[];
-  absorption_zones: any[];
-  exhaustion_signals: any[];
+  imbalances: UnknownRecord[];
+  absorption_zones: UnknownRecord[];
+  exhaustion_signals: UnknownRecord[];
 }
 
 interface MarketStructure {
   structure: string;
   trend: string;
-  swing_highs: any[];
-  swing_lows: any[];
-  bos_signals: any[];
-  choch_signals: any[];
+  swing_highs: SwingPoint[];
+  swing_lows: SwingPoint[];
+  bos_signals: BosSignal[];
+  choch_signals: BosSignal[];
 }
 
 interface RiskMetrics {
@@ -78,17 +166,17 @@ interface InstitutionalLevel {
 }
 
 interface ChartData {
-  candles: any[];
-  volume_profile: VolumeProfile;
-  vwap: any[];
-  delta: any[];
+  candles: Candle[];
+  volume_profile: VolumeProfile | null;
+  vwap: VwapPoint[];
+  delta: DeltaPoint[];
   current_price: number;
-  order_flow_imbalance: OrderFlowImbalance;
-  footprint: FootprintAnalysis;
-  liquidity_sweeps: any[];
-  market_structure: MarketStructure;
-  institutional_levels: { levels: InstitutionalLevel[], zones: any[] };
-  risk_metrics: RiskMetrics;
+  order_flow_imbalance: OrderFlowImbalance | null;
+  footprint: FootprintAnalysis | null;
+  liquidity_sweeps: LiquiditySweep[];
+  market_structure: MarketStructure | null;
+  institutional_levels: { levels: InstitutionalLevel[], zones: UnknownRecord[] } | null;
+  risk_metrics: RiskMetrics | null;
 }
 
 interface TradingState {
@@ -100,8 +188,8 @@ interface TradingState {
   regime: string;
   confluence_score: number;
   kill_switch_active: boolean;
-  open_positions: any[];
-  closed_trades: any[];
+  open_positions: UnknownRecord[];
+  closed_trades: ClosedTrade[];
 }
 
 interface Performance {
@@ -308,16 +396,16 @@ const VolumeProfileChart = ({ data, currentPrice, symbol }: { data: VolumeProfil
 };
 
 // UNPUSHABLE BREAKTHROUGH: DeepCharts-style integrated chart with Volume Profile, Confidence Zones, Entry/Exit Markers
-const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweeps, marketStructure, unifiedDecision, tradeSetup, delta: _delta }: {
-  candles: any[], 
-  vwap: any[], 
+const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweeps, marketStructure, unifiedDecision, tradeSetup }: {
+  candles: Candle[], 
+  vwap: VwapPoint[], 
   symbol: string,
   volumeProfile?: VolumeProfile | null,
-  liquiditySweeps?: any[],
+  liquiditySweeps?: LiquiditySweep[],
   marketStructure?: MarketStructure | null,
-  unifiedDecision?: { decision: string, confidence: number, signals: any[] } | null,
+  unifiedDecision?: UnifiedDecision | null,
   tradeSetup?: { direction: string, confidence: number, entry: number, stopLoss: number, target1: number, target2: number, riskReward1: number, isHighProbability: boolean } | null,
-  delta?: any[]
+  delta?: DeltaPoint[]
 }) => {
   const decimals = symbol === 'XAUUSD' ? 2 : symbol === 'USDJPY' ? 3 : 5;
   
@@ -370,7 +458,7 @@ const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweep
     }
 
     // BREAKTHROUGH: Volume Profile bars extending FROM LEFT INTO the chart (DeepCharts style)
-    let vpBars: any[] = [];
+    let vpBars: VpBar[] = [];
     if (volumeProfile?.levels) {
       const maxVol = Math.max(...volumeProfile.levels.map(l => l.volume_pct));
       vpBars = volumeProfile.levels.map(level => {
@@ -579,17 +667,17 @@ const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweep
 
         {/* X-axis time labels */}
         <g className="x-axis">
-          {chartData.filter((_, i) => i % Math.ceil(chartData.length / 6) === 0 || i === chartData.length - 1).map((candle, idx) => {
-            const actualIdx = chartData.indexOf(candle);
-            const x = indexToX(actualIdx);
-            const time = candle.time ? new Date(candle.time).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : `Bar ${actualIdx}`;
-            return (
-              <g key={`xaxis-${idx}`}>
-                <line x1={x} y1={chartHeight - 20} x2={x} y2={chartHeight - 15} stroke="#334155" />
-                <text x={x} y={chartHeight - 5} fill="#64748b" fontSize="9" textAnchor="middle">{time}</text>
-              </g>
-            );
-          })}
+	          {chartData.filter((_, i) => i % Math.ceil(chartData.length / 6) === 0 || i === chartData.length - 1).map((candle, idx) => {
+	            const actualIdx = chartData.indexOf(candle);
+	            const x = indexToX(actualIdx);
+	            const time = candle.timestamp ? new Date(candle.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : `Bar ${actualIdx}`;
+	            return (
+	              <g key={`xaxis-${idx}`}>
+	                <line x1={x} y1={chartHeight - 20} x2={x} y2={chartHeight - 15} stroke="#334155" />
+	                <text x={x} y={chartHeight - 5} fill="#64748b" fontSize="9" textAnchor="middle">{time}</text>
+	              </g>
+	            );
+	          })}
         </g>
 
         {/* VWAP bands */}
@@ -664,24 +752,28 @@ const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweep
         )}
 
         {/* Liquidity sweep markers */}
-        {liquiditySweeps?.slice(0, 5).map((sweep, i) => (
-          <g key={`sweep-${i}`}>
-            <line
-              x1={marginLeft}
-              y1={priceToY(sweep.price)}
-              x2={chartWidth - marginRight}
-              y2={priceToY(sweep.price)}
-              stroke={sweep.type.includes('HIGH') ? '#f59e0b' : '#3b82f6'}
-              strokeWidth="1"
-              strokeDasharray="8 4"
-              opacity="0.5"
-            />
-          </g>
-        ))}
+        {liquiditySweeps?.slice(0, 5).map((sweep, i) => {
+          const sweepPrice = sweep.sweep_price ?? sweep.price;
+          if (typeof sweepPrice !== 'number') return null;
+          return (
+            <g key={`sweep-${i}`}>
+              <line
+                x1={marginLeft}
+                y1={priceToY(sweepPrice)}
+                x2={chartWidth - marginRight}
+                y2={priceToY(sweepPrice)}
+                stroke={sweep.type.includes('HIGH') ? '#f59e0b' : '#3b82f6'}
+                strokeWidth="1"
+                strokeDasharray="8 4"
+                opacity="0.5"
+              />
+            </g>
+          );
+        })}
 
         {/* BREAKTHROUGH: Swing High/Low markers for market structure */}
-        {swingHighs.slice(-5).map((sh: any, i: number) => {
-          const barIdx = chartData.findIndex((c: any) => Math.abs(c.high - sh.price) < 0.0001);
+        {swingHighs.slice(-5).map((sh, i) => {
+          const barIdx = chartData.findIndex((c) => Math.abs(c.high - sh.price) < 0.0001);
           if (barIdx < 0) return null;
           return (
             <g key={`sh-${i}`}>
@@ -690,8 +782,8 @@ const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweep
             </g>
           );
         })}
-        {swingLows.slice(-5).map((sl: any, i: number) => {
-          const barIdx = chartData.findIndex((c: any) => Math.abs(c.low - sl.price) < 0.0001);
+        {swingLows.slice(-5).map((sl, i) => {
+          const barIdx = chartData.findIndex((c) => Math.abs(c.low - sl.price) < 0.0001);
           if (barIdx < 0) return null;
           return (
             <g key={`sl-${i}`}>
@@ -916,7 +1008,7 @@ const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweep
   );
 };
 
-const DeltaChart = ({ data }: { data: any[] }) => {
+const DeltaChart = ({ data }: { data: DeltaPoint[] }) => {
   if (!data || data.length === 0) return <div className="h-full flex items-center justify-center text-slate-500">Loading...</div>;
 
   return (
@@ -937,7 +1029,7 @@ const DeltaChart = ({ data }: { data: any[] }) => {
   );
 };
 
-const CumulativeDeltaChart = ({ data }: { data: any[] }) => {
+const CumulativeDeltaChart = ({ data }: { data: DeltaPoint[] }) => {
   if (!data || data.length === 0) return <div className="h-full flex items-center justify-center text-slate-500">Loading...</div>;
 
   const lastDelta = data[data.length - 1]?.cumulative_delta || 0;
@@ -977,7 +1069,7 @@ const UnifiedIntelligence = ({
   orderFlow: OrderFlowImbalance | null,
   marketStructure: MarketStructure | null,
   riskMetrics: RiskMetrics | null,
-  delta: any[],
+  delta: DeltaPoint[],
   currentPrice: number,
   symbol: string
 }) => {
@@ -1065,7 +1157,7 @@ const UnifiedIntelligence = ({
     const bearish = signals.filter(s => s.score < 0);
     
     let decision = 'WAIT';
-    let confidence = Math.abs(confluenceScore) * 100;
+    const confidence = Math.abs(confluenceScore) * 100;
     
     if (confluenceScore > 0.5) {
       decision = 'STRONG BUY';
@@ -1228,7 +1320,7 @@ const PredictiveTradeSetup = ({
   volumeProfile: VolumeProfile | null,
   marketStructure: MarketStructure | null,
   orderFlow: OrderFlowImbalance | null,
-  delta: any[],
+  delta: DeltaPoint[],
   currentPrice: number,
   symbol: string
 }) => {
@@ -1332,7 +1424,7 @@ const PredictiveTradeSetup = ({
     const smartMoneySignals: string[] = [];
     if (delta && delta.length > 5) {
       const recentDeltas = delta.slice(-5);
-      const avgDelta = recentDeltas.reduce((sum: number, d: any) => sum + Math.abs(d.delta || 0), 0) / 5;
+      const avgDelta = recentDeltas.reduce((sum: number, d) => sum + Math.abs(d.delta || 0), 0) / 5;
       if (avgDelta > 1000) {
         smartMoneySignals.push('High volume activity - institutions active');
       }
@@ -1492,7 +1584,7 @@ const MultiTimeframeConfluence = ({
 }: { 
   volumeProfile: VolumeProfile | null,
   marketStructure: MarketStructure | null,
-  delta: any[],
+  delta: DeltaPoint[],
   currentPrice: number
 }) => {
   // Simulate multi-timeframe analysis (in production, this would fetch data from different timeframes)
@@ -1599,7 +1691,7 @@ const MultiTimeframeConfluence = ({
 };
 
 // UNPUSHABLE BREAKTHROUGH: Historical Accuracy Tracker
-const HistoricalAccuracyTracker = ({ closedTrades }: { closedTrades: any[] }) => {
+const HistoricalAccuracyTracker = ({ closedTrades }: { closedTrades: ClosedTrade[] }) => {
   const stats = useMemo(() => {
     if (!closedTrades || closedTrades.length === 0) {
       return { winRate: 0, avgRR: 0, profitFactor: 0, streak: 0, last10: [] };
@@ -1784,11 +1876,11 @@ function App() {
       if (perfRes.ok) setPerformance(await perfRes.json());
       if (pricesRes.ok) setPrices(await pricesRes.json());
       if (chartRes.ok) {
-        const data = await chartRes.json();
-        if (data.delta) {
-          data.delta = data.delta.map((d: any, i: number) => ({ ...d, idx: i }));
+        const data = (await chartRes.json()) as Partial<ChartData>;
+        if (Array.isArray(data.delta)) {
+          data.delta = data.delta.map((d, i) => ({ ...d, idx: i }));
         }
-        setChartData(data);
+        setChartData(data as ChartData);
       }
       setIsConnected(true);
       setLastUpdate(new Date());
@@ -2017,7 +2109,7 @@ function App() {
                                                             const price = chartData?.current_price || 0;
                                 
                                                             let score = 0;
-                                                            const signals: any[] = [];
+                                                            const signals: UnifiedSignal[] = [];
                                 
                                                             // Volume Profile signal
                                                             if (vp) {
