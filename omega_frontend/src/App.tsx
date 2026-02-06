@@ -86,6 +86,60 @@ interface UnifiedDecision {
   signals: UnifiedSignal[];
 }
 
+interface EvidencePin {
+  pin_id: string;
+  pin_type: string;
+  bar_indices: number[];
+  feature_name: string;
+  description: string;
+  severity: number;
+  zone?: { price_low: number; price_high: number } | null;
+}
+
+interface ResolutionCondition {
+  condition: string;
+  type: string;
+  anchors: UnknownRecord[];
+}
+
+interface WeavePacket {
+  packet_id: string;
+  timestamp: string;
+  symbol: string;
+  timeframe: string;
+  bar_index: number;
+  decision: string;
+  confidence: number;
+  reason_codes: string[];
+  reason_text: string;
+  evidence_pins: EvidencePin[];
+  conflict_map: UnknownRecord[];
+  resolution_conditions: ResolutionCondition[];
+  features: Record<string, UnknownRecord>;
+}
+
+interface DomProviderHealth {
+  symbol: string;
+  provider: string;
+  state: string;
+  is_real: boolean;
+  snapshots_received: number;
+  consecutive_valid_snapshots: number;
+  warmup_required: number;
+  last_snapshot_ts: string | null;
+  last_snapshot_age_sec: number | null;
+  stale_threshold_sec: number;
+  last_error: string | null;
+}
+
+interface ProvenanceStatus {
+  real_dom_required: boolean;
+  dom_status?: {
+    real_dom_required: boolean;
+    providers: Record<string, DomProviderHealth>;
+  };
+}
+
 interface VpBar {
   y: number;
   height: number;
@@ -396,7 +450,7 @@ const VolumeProfileChart = ({ data, currentPrice, symbol }: { data: VolumeProfil
 };
 
 // UNPUSHABLE BREAKTHROUGH: DeepCharts-style integrated chart with Volume Profile, Confidence Zones, Entry/Exit Markers
-const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweeps, marketStructure, unifiedDecision, tradeSetup }: {
+const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweeps, marketStructure, unifiedDecision, tradeSetup, highlightedBars, highlightZone, highlightColor }: {
   candles: Candle[], 
   vwap: VwapPoint[], 
   symbol: string,
@@ -405,7 +459,10 @@ const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweep
   marketStructure?: MarketStructure | null,
   unifiedDecision?: UnifiedDecision | null,
   tradeSetup?: { direction: string, confidence: number, entry: number, stopLoss: number, target1: number, target2: number, riskReward1: number, isHighProbability: boolean } | null,
-  delta?: DeltaPoint[]
+  delta?: DeltaPoint[],
+  highlightedBars?: number[],
+  highlightZone?: { price_low: number; price_high: number } | null,
+  highlightColor?: string
 }) => {
   const decimals = symbol === 'XAUUSD' ? 2 : symbol === 'USDJPY' ? 3 : 5;
   
@@ -495,6 +552,9 @@ const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweep
       vpWidth, swingHighs, swingLows
     };
   }, [chartData, volumeProfile, marketStructure]);
+
+  const highlightSet = useMemo(() => new Set(highlightedBars || []), [highlightedBars]);
+  const hc = highlightColor || '#06b6d4';
 
   if (!chartCalculations) {
     return (
@@ -793,6 +853,18 @@ const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweep
           );
         })}
 
+        {/* WOVEN: Highlight zone from EvidencePin.zone */}
+        {highlightZone && (
+          <rect
+            x={marginLeft}
+            y={priceToY(Math.max(highlightZone.price_low, highlightZone.price_high))}
+            width={chartWidth - marginRight - marginLeft}
+            height={Math.abs(priceToY(highlightZone.price_low) - priceToY(highlightZone.price_high))}
+            fill={hc}
+            opacity="0.12"
+          />
+        )}
+
         {/* Candlesticks with proper OHLC rendering */}
         {chartData.map((candle, i) => {
           const x = indexToX(i);
@@ -803,9 +875,23 @@ const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweep
           const wickTop = priceToY(candle.high);
           const wickBottom = priceToY(candle.low);
           const color = bullish ? '#10b981' : '#ef4444';
+          const isHighlighted = highlightSet.has(i);
 
           return (
             <g key={i} className="candle">
+              {isHighlighted && (
+                <rect
+                  x={x - candleWidth}
+                  y={wickTop - 3}
+                  width={candleWidth * 2}
+                  height={Math.max(6, wickBottom - wickTop + 6)}
+                  fill="none"
+                  stroke={hc}
+                  strokeWidth="2"
+                  rx="2"
+                  opacity="0.9"
+                />
+              )}
               {/* Upper wick */}
               <line x1={x} y1={wickTop} x2={x} y2={bodyTop} stroke={color} strokeWidth="1"/>
               {/* Lower wick */}
@@ -1064,6 +1150,7 @@ const UnifiedIntelligence = ({
   marketStructure, 
   delta,
   currentPrice,
+  weavePacket,
 }: { 
   volumeProfile: VolumeProfile | null,
   orderFlow: OrderFlowImbalance | null,
@@ -1071,7 +1158,8 @@ const UnifiedIntelligence = ({
   riskMetrics: RiskMetrics | null,
   delta: DeltaPoint[],
   currentPrice: number,
-  symbol: string
+  symbol: string,
+  weavePacket?: WeavePacket | null
 }) => {
   // Calculate unified intelligence scores
   const volumeSignal = useMemo(() => {
@@ -1172,6 +1260,11 @@ const UnifiedIntelligence = ({
     return { signals, bullish, bearish, decision, confidence };
   }, [volumeSignal, deltaSignal, orderFlowSignal, structureSignal, confluenceScore]);
 
+  const decisionText = weavePacket?.decision ?? systemReasoning.decision;
+  const decisionConfidence =
+    typeof weavePacket?.confidence === 'number' ? weavePacket.confidence : systemReasoning.confidence;
+  const decisionReasonText = weavePacket?.reason_text ?? '';
+
   const getScoreColor = (score: number) => {
     if (score > 0.5) return 'text-emerald-400';
     if (score > 0) return 'text-emerald-300';
@@ -1181,8 +1274,8 @@ const UnifiedIntelligence = ({
   };
 
   const getDecisionColor = (decision: string) => {
-    if (decision.includes('BUY')) return 'from-emerald-500 to-cyan-500';
-    if (decision.includes('SELL')) return 'from-red-500 to-orange-500';
+    if (decision.includes('TRADE') || decision.includes('BUY')) return 'from-emerald-500 to-cyan-500';
+    if (decision.includes('SELL') || decision.includes('SKIP')) return 'from-red-500 to-orange-500';
     return 'from-slate-500 to-slate-600';
   };
 
@@ -1199,19 +1292,25 @@ const UnifiedIntelligence = ({
             </div>
             <div className="flex items-center gap-1">
               <Sparkles className="w-4 h-4 text-yellow-400 animate-pulse" />
-              <span className="text-xs text-slate-400">LIVE REASONING</span>
+              <span className="text-xs text-slate-400">{weavePacket ? 'WOVEN PACKET' : 'LOCAL HEURISTIC (Tier C)'}</span>
             </div>
           </div>
           
           {/* Central Decision Display */}
-          <div className={`text-center py-4 rounded-lg bg-gradient-to-r ${getDecisionColor(systemReasoning.decision)} mb-3`}>
+          <div className={`text-center py-4 rounded-lg bg-gradient-to-r ${getDecisionColor(decisionText)} mb-3`}>
             <div className="text-2xl font-black text-white tracking-wider">
-              {systemReasoning.decision}
+              {decisionText}
             </div>
             <div className="text-sm text-white/80">
-              Confidence: {systemReasoning.confidence.toFixed(0)}%
+              Confidence: {decisionConfidence.toFixed(0)}%
             </div>
           </div>
+
+          {weavePacket && decisionReasonText && (
+            <div className="text-[11px] text-slate-300 mb-3 text-center">
+              {decisionReasonText}
+            </div>
+          )}
           
           {/* Confluence Score Bar */}
           <div className="mb-3">
@@ -1296,10 +1395,10 @@ const UnifiedIntelligence = ({
             <span className="font-bold text-cyan-400">SYNTHESIS: </span>
             {systemReasoning.bullish.length} bullish signals ({systemReasoning.bullish.map(s => s.name).join(', ') || 'none'}) vs {systemReasoning.bearish.length} bearish signals ({systemReasoning.bearish.map(s => s.name).join(', ') || 'none'}).
             <span className={`font-bold ml-1 ${
-              systemReasoning.decision.includes('BUY') ? 'text-emerald-400' :
-              systemReasoning.decision.includes('SELL') ? 'text-red-400' : 'text-slate-400'
+              decisionText.includes('TRADE') || decisionText.includes('BUY') ? 'text-emerald-400' :
+              decisionText.includes('SELL') || decisionText.includes('SKIP') ? 'text-red-400' : 'text-slate-400'
             }`}>
-              System recommends: {systemReasoning.decision}
+              System recommends: {decisionText}
             </span>
           </div>
         </div>
@@ -1854,22 +1953,31 @@ function App() {
   const [state, setState] = useState<TradingState | null>(null);
   const [performance, setPerformance] = useState<Performance | null>(null);
   const [chartData, setChartData] = useState<ChartData | null>(null);
+  const [weavePacket, setWeavePacket] = useState<WeavePacket | null>(null);
+  const [provenanceStatus, setProvenanceStatus] = useState<ProvenanceStatus | null>(null);
+  const [selectedPin, setSelectedPin] = useState<EvidencePin | null>(null);
   const [selectedSymbol, setSelectedSymbol] = useState('EURUSD');
   const [prices, setPrices] = useState<Record<string, number>>({});
   const [isConnected, setIsConnected] = useState(false);
   const [activeTab, setActiveTab] = useState<'brain' | 'setup' | 'mtf' | 'accuracy' | 'orderflow' | 'levels' | 'risk'>('brain');
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
-  const symbols = ['EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'XAUUSD'];
-  const decimals = selectedSymbol === 'XAUUSD' ? 2 : selectedSymbol === 'USDJPY' ? 3 : 5;
+  const symbols = ['BTCUSDT', 'ETHUSDT', 'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'XAUUSD'];
+  const decimals =
+    selectedSymbol === 'XAUUSD' ? 2 :
+    selectedSymbol === 'USDJPY' ? 3 :
+    selectedSymbol.endsWith('USDT') ? 2 :
+    5;
 
   const fetchData = useCallback(async () => {
     try {
-      const [stateRes, perfRes, pricesRes, chartRes] = await Promise.all([
+      const [stateRes, perfRes, pricesRes, chartRes, weaveRes, provRes] = await Promise.all([
         fetch(`${API_URL}/api/state`),
         fetch(`${API_URL}/api/performance`),
         fetch(`${API_URL}/api/prices`),
-        fetch(`${API_URL}/api/chart-data/${selectedSymbol}?bars=100`)
+        fetch(`${API_URL}/api/chart-data/${selectedSymbol}?bars=100`),
+        fetch(`${API_URL}/api/weave-packet/${selectedSymbol}`),
+        fetch(`${API_URL}/api/provenance/status`),
       ]);
 
       if (stateRes.ok) setState(await stateRes.json());
@@ -1881,6 +1989,15 @@ function App() {
           data.delta = data.delta.map((d, i) => ({ ...d, idx: i }));
         }
         setChartData(data as ChartData);
+      }
+      if (weaveRes.ok) {
+        const wp = (await weaveRes.json()) as { packet?: WeavePacket | null };
+        setWeavePacket(wp.packet ?? null);
+      } else {
+        setWeavePacket(null);
+      }
+      if (provRes.ok) {
+        setProvenanceStatus((await provRes.json()) as ProvenanceStatus);
       }
       setIsConnected(true);
       setLastUpdate(new Date());
@@ -1895,6 +2012,10 @@ function App() {
     const interval = setInterval(fetchData, 5000);
     return () => clearInterval(interval);
   }, [fetchData]);
+
+  useEffect(() => {
+    setSelectedPin(null);
+  }, [selectedSymbol]);
 
   const formatCurrency = (value: number) => {
     return new Intl.NumberFormat('en-US', {
@@ -1920,6 +2041,51 @@ function App() {
     if (structure === 'BEARISH') return <TrendingDown className="w-4 h-4 text-red-400" />;
     return <Activity className="w-4 h-4 text-amber-400" />;
   };
+
+  const wovenDecision = useMemo<UnifiedDecision | null>(() => {
+    if (!weavePacket) return null;
+    return {
+      decision: weavePacket.decision,
+      confidence: weavePacket.confidence,
+      signals: [],
+    };
+  }, [weavePacket]);
+
+  const highlight = useMemo(() => {
+    if (!selectedPin) {
+      return { bars: [] as number[], zone: null as EvidencePin["zone"], color: undefined as string | undefined };
+    }
+    const color =
+      selectedPin.severity >= 3 ? '#ef4444' :
+      selectedPin.severity === 2 ? '#f59e0b' :
+      '#06b6d4';
+    return { bars: selectedPin.bar_indices || [], zone: selectedPin.zone || null, color };
+  }, [selectedPin]);
+
+  const highlightedBars = useMemo(() => {
+    const abs = highlight.bars;
+    if (!weavePacket || !chartData || abs.length === 0) return [];
+    const n = chartData.candles.length;
+    if (n <= 0) return [];
+    const lastAbs = weavePacket.bar_index;
+    const firstAbs = lastAbs - (n - 1);
+    return abs
+      .map((i) => i - firstAbs)
+      .filter((i) => i >= 0 && i < n);
+  }, [highlight.bars, weavePacket, chartData]);
+
+  const isNoTrade = !!weavePacket && weavePacket.decision !== 'TRADE';
+  const domHealth = provenanceStatus?.dom_status?.providers?.[selectedSymbol];
+
+  const startRealDom = useCallback(async () => {
+    try {
+      await fetch(`${API_URL}/api/real-dom/start/${selectedSymbol}`, { method: 'POST' });
+      // Force-refresh status immediately after start.
+      fetchData();
+    } catch (e) {
+      console.error('Failed to start real DOM:', e);
+    }
+  }, [selectedSymbol, fetchData]);
 
   return (
     <div className="min-h-screen bg-[#0a0e17] text-white">
@@ -1968,6 +2134,56 @@ function App() {
               <span className={`text-xs font-medium ${isConnected ? 'text-emerald-400' : 'text-red-400'}`}>
                 {isConnected ? 'LIVE' : 'OFFLINE'}
               </span>
+            </div>
+
+            <div
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
+                !domHealth ? 'bg-slate-500/15' :
+                !domHealth.is_real ? 'bg-slate-500/15' :
+                domHealth.state === 'CONNECTED' ? 'bg-emerald-500/20' :
+                domHealth.state === 'CONNECTING' ? 'bg-amber-500/20' :
+                domHealth.state === 'STALE' ? 'bg-orange-500/20' :
+                'bg-red-500/20'
+              }`}
+              title={domHealth ? `Provider: ${domHealth.provider} | State: ${domHealth.state}` : 'No DOM status yet'}
+            >
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  !domHealth ? 'bg-slate-500' :
+                  !domHealth.is_real ? 'bg-slate-500' :
+                  domHealth.state === 'CONNECTED' ? 'bg-emerald-500' :
+                  domHealth.state === 'CONNECTING' ? 'bg-amber-500' :
+                  domHealth.state === 'STALE' ? 'bg-orange-500' :
+                  'bg-red-500'
+                }`}
+              />
+              <span className="text-xs font-medium text-slate-200">
+                DOM
+              </span>
+              <span className={`text-xs font-medium ${
+                !domHealth ? 'text-slate-400' :
+                !domHealth.is_real ? 'text-slate-400' :
+                domHealth.state === 'CONNECTED' ? 'text-emerald-400' :
+                domHealth.state === 'CONNECTING' ? 'text-amber-400' :
+                domHealth.state === 'STALE' ? 'text-orange-400' :
+                'text-red-400'
+              }`}>
+                {domHealth ? (domHealth.is_real ? domHealth.state : 'SYNTHETIC') : '---'}
+              </span>
+              {domHealth?.is_real && domHealth.warmup_required > 0 && domHealth.state !== 'CONNECTED' && (
+                <span className="text-[10px] text-slate-400">
+                  {domHealth.consecutive_valid_snapshots}/{domHealth.warmup_required}
+                </span>
+              )}
+              {selectedSymbol.endsWith('USDT') && (
+                <button
+                  onClick={startRealDom}
+                  className="ml-1 px-2 py-0.5 rounded bg-slate-800/60 border border-slate-700 text-[10px] text-slate-200 hover:bg-slate-700/60"
+                  title="Start REAL DOM feed (requires server REAL_DOM=true)"
+                >
+                  Start L2
+                </button>
+              )}
             </div>
 
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${state?.kill_switch_active ? 'bg-red-500/20' : 'bg-emerald-500/20'}`}>
@@ -2092,7 +2308,7 @@ function App() {
                 </div>
               </div>
             </div>
-            <div className="h-[calc(100%-30px)]">
+	            <div className="h-[calc(100%-30px)] relative">
                                                         <CandlestickChart 
                                                           candles={chartData?.candles || []} 
                                                           vwap={chartData?.vwap || []} 
@@ -2100,7 +2316,7 @@ function App() {
                                                           volumeProfile={chartData?.volume_profile}
                                                           liquiditySweeps={chartData?.liquidity_sweeps}
                                                           marketStructure={chartData?.market_structure}
-                                                          unifiedDecision={(() => {
+                                                          unifiedDecision={wovenDecision || (() => {
                                                             // Calculate unified decision for chart display
                                                             const vp = chartData?.volume_profile;
                                                             const of = chartData?.order_flow_imbalance;
@@ -2231,9 +2447,85 @@ function App() {
                                                                                                                     };
                                                                                                                   })()}
                                                                                                                   delta={chartData?.delta || []}
+                                                                                                                  highlightedBars={highlightedBars}
+                                                                                                                  highlightZone={highlight.zone}
+                                                                                                                  highlightColor={highlight.color}
                                                                                                                 />
-            </div>
-          </div>
+
+              {/* WOVEN: No-Trade Fog + Evidence Pins (Why Wait) */}
+              {isNoTrade && weavePacket && (
+                <>
+                  <div className="absolute inset-0 bg-slate-950/35 backdrop-blur-[1px] pointer-events-none" />
+                  <div className="absolute left-3 top-3 right-3 pointer-events-auto">
+                    <div className="bg-slate-950/70 border border-slate-700/60 rounded-lg p-3 shadow-xl">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-xs font-bold text-slate-200 tracking-wide">
+                          WHY {weavePacket.decision}
+                        </div>
+                        <div className="text-[10px] text-slate-400 font-mono">
+                          conf {weavePacket.confidence.toFixed(0)}%
+                        </div>
+                      </div>
+                      <div className="mt-1 text-[11px] text-slate-300">
+                        {weavePacket.reason_text}
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        {(weavePacket.evidence_pins || []).map((pin) => {
+                          const sev = pin.severity || 1;
+                          const isSelected = selectedPin?.pin_id === pin.pin_id;
+                          const badge =
+                            sev >= 3 ? 'bg-red-500/20 text-red-300 border-red-500/40' :
+                            sev === 2 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
+                            'bg-cyan-500/15 text-cyan-200 border-cyan-500/30';
+                          return (
+                            <button
+                              key={pin.pin_id}
+                              onClick={() => setSelectedPin(isSelected ? null : pin)}
+                              className={`px-2 py-1 rounded-md border text-[11px] text-left max-w-[260px] truncate ${
+                                isSelected ? 'bg-slate-800/80 border-slate-400/50' : badge
+                              }`}
+                              title={`${pin.feature_name}: ${pin.description}`}
+                            >
+                              <span className="font-mono opacity-80">{pin.pin_type}</span>
+                              <span className="mx-1 opacity-40">|</span>
+                              <span className="font-semibold">{pin.feature_name}</span>
+                              <span className="mx-1 opacity-40">:</span>
+                              <span className="opacity-90">{pin.description}</span>
+                            </button>
+                          );
+                        })}
+                        {selectedPin && (
+                          <button
+                            onClick={() => setSelectedPin(null)}
+                            className="px-2 py-1 rounded-md border border-slate-600 text-[11px] text-slate-200 hover:bg-slate-800/60"
+                            title="Clear highlights"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+
+                      {(weavePacket.resolution_conditions || []).length > 0 && (
+                        <div className="mt-2">
+                          <div className="text-[10px] uppercase tracking-wide text-slate-400">
+                            Resolution Conditions
+                          </div>
+                          <ul className="mt-1 space-y-1">
+                            {(weavePacket.resolution_conditions || []).slice(0, 4).map((rc, idx) => (
+                              <li key={idx} className="text-[11px] text-slate-200">
+                                <span className="text-slate-400">-</span> {rc.condition}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+	            </div>
+	          </div>
 
           <div className="grid grid-cols-2 gap-4" style={{ height: '25%' }}>
             <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
@@ -2368,6 +2660,7 @@ function App() {
                                           delta={chartData?.delta || []}
                                           currentPrice={chartData?.current_price || 0}
                                           symbol={selectedSymbol}
+                                          weavePacket={weavePacket}
                                         />
                                       </div>
                                     )}
