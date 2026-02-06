@@ -222,7 +222,13 @@ class BinanceL2Provider(MarketDataProvider):
     venue_name = "binance"
     is_real = True
 
-    WEBSOCKET_URL = "wss://stream.binance.com:9443/ws"
+    # NOTE: In some environments `stream.binance.com` returns HTTP 451.
+    # We try a small fallback set (configurable) to keep REAL_DOM verifiable.
+    _DEFAULT_WS_BASE_URLS = (
+        "wss://stream.binance.com:9443/ws",
+        "wss://stream.binance.us:9443/ws",
+        "wss://data-stream.binance.vision/ws",
+    )
 
     def __init__(self, symbol: str, depth: int = 20):
         super().__init__(symbol=symbol)
@@ -244,6 +250,33 @@ class BinanceL2Provider(MarketDataProvider):
     def _stream_name(self) -> str:
         return f"{self.symbol.lower()}@depth{self.depth}@100ms"
 
+    def _ws_base_urls(self) -> List[str]:
+        raw = os.environ.get("BINANCE_WS_BASE_URLS") or os.environ.get("BINANCE_WS_BASE_URL")
+        if raw:
+            urls = [u.strip().rstrip("/") for u in raw.split(",") if u.strip()]
+            if urls:
+                return urls
+        return list(self._DEFAULT_WS_BASE_URLS)
+
+    def _ssl_context(self) -> Any:
+        # Python.org macOS builds often lack a configured CA bundle; use certifi when available.
+        import ssl
+
+        cafile = (
+            os.environ.get("SSL_CERT_FILE")
+            or os.environ.get("REQUESTS_CA_BUNDLE")
+            or os.environ.get("CURL_CA_BUNDLE")
+        )
+        if cafile:
+            return ssl.create_default_context(cafile=cafile)
+
+        try:
+            import certifi  # type: ignore
+        except Exception:
+            return ssl.create_default_context()
+
+        return ssl.create_default_context(cafile=certifi.where())
+
     def _ensure_deps(self) -> Optional[Any]:
         try:
             import websockets  # type: ignore
@@ -263,16 +296,22 @@ class BinanceL2Provider(MarketDataProvider):
             return True
 
         self.state = FeedState.CONNECTING
-        stream_url = f"{self.WEBSOCKET_URL}/{self._stream_name()}"
-        try:
-            self.websocket = await websockets.connect(stream_url)
-            logger.info("Connected Binance L2: %s", stream_url)
-            return True
-        except Exception as e:
-            self.last_error = f"connect_failed: {type(e).__name__}: {e}"
-            self.state = FeedState.DISCONNECTED
-            logger.error("BinanceL2Provider connect failed: %s", self.last_error)
-            return False
+        ssl_ctx = self._ssl_context()
+
+        errors: List[str] = []
+        for base_url in self._ws_base_urls():
+            stream_url = f"{base_url}/{self._stream_name()}"
+            try:
+                self.websocket = await websockets.connect(stream_url, ssl=ssl_ctx)
+                logger.info("Connected Binance L2: %s", stream_url)
+                return True
+            except Exception as e:
+                errors.append(f"{stream_url}: {type(e).__name__}: {e}")
+
+        self.last_error = f"connect_failed: {errors[-1] if errors else 'unknown'}"
+        self.state = FeedState.DISCONNECTED
+        logger.error("BinanceL2Provider connect failed: %s", self.last_error)
+        return False
 
     async def _disconnect(self) -> None:
         self.running = False
