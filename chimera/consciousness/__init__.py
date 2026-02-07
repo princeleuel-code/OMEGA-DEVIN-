@@ -173,6 +173,46 @@ from .session_trade_management import (
     PsychologyState,
 )
 
+# BREAKTHROUGH: Self-Evolving Intelligence Engine
+from .self_evolving_intelligence import (
+    SelfEvolvingIntelligence,
+    EvolutionAnalysis,
+    EvolutionState,
+    SignalStats,
+    TradeRecord,
+    EvolutionPhase,
+    SignalPerformance,
+    MarketRegime as EvolutionMarketRegime,
+)
+
+# BREAKTHROUGH: Institutional Flow Detection
+from .institutional_flow_detection import (
+    InstitutionalFlowDetection,
+    InstitutionalFlowAnalysis,
+    LargeOrderSignature,
+    AccumulationDistributionPhase,
+    SmartMoneyZone,
+    LiquidityPool,
+    InstitutionalActivity,
+    OrderFlowType,
+    LiquidityType,
+    IcebergType,
+)
+
+# BREAKTHROUGH: Cross-Asset Correlation Intelligence
+from .cross_asset_correlation import (
+    CrossAssetCorrelationIntelligence,
+    CrossAssetAnalysis,
+    AssetCorrelation,
+    DXYImpact,
+    RiskSentiment,
+    LeadingIndicator,
+    IntermarketDivergence,
+    MarketSentiment,
+    CorrelationStrength,
+    DivergenceType,
+)
+
 __all__ = [
     # Core consciousness
     "MarketConsciousness",
@@ -351,4 +391,38 @@ __all__ = [
     "NewsImpact",
     "TradeManagementAction",
     "PsychologyState",
+    
+    # BREAKTHROUGH: Self-Evolving Intelligence Engine
+    "SelfEvolvingIntelligence",
+    "EvolutionAnalysis",
+    "EvolutionState",
+    "SignalStats",
+    "TradeRecord",
+    "EvolutionPhase",
+    "SignalPerformance",
+    "EvolutionMarketRegime",
+    
+    # BREAKTHROUGH: Institutional Flow Detection
+    "InstitutionalFlowDetection",
+    "InstitutionalFlowAnalysis",
+    "LargeOrderSignature",
+    "AccumulationDistributionPhase",
+    "SmartMoneyZone",
+    "LiquidityPool",
+    "InstitutionalActivity",
+    "OrderFlowType",
+    "LiquidityType",
+    "IcebergType",
+    
+    # BREAKTHROUGH: Cross-Asset Correlation Intelligence
+    "CrossAssetCorrelationIntelligence",
+    "CrossAssetAnalysis",
+    "AssetCorrelation",
+    "DXYImpact",
+    "RiskSentiment",
+    "LeadingIndicator",
+    "IntermarketDivergence",
+    "MarketSentiment",
+    "CorrelationStrength",
+    "DivergenceType",
 ]
