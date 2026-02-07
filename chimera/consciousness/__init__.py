@@ -67,6 +67,49 @@ from .complete_intelligence import (
     create_complete_intelligence,
 )
 
+# NEW BREAKTHROUGH MODULES
+from .smc_intelligence import (
+    SMCIntelligence,
+    SMCAnalysis,
+    SMCZone,
+    SwingPoint,
+    StructureBreakEvent,
+    StructureType,
+    ZoneType,
+    StructureBreak,
+)
+from .mtf_intelligence import (
+    MTFIntelligence,
+    MTFConfluence,
+    TimeframeAnalysis,
+    TimeframeType,
+    TrendDirection,
+    AlignmentType,
+)
+from .adaptive_regime import (
+    AdaptiveRegimeIntelligence,
+    RegimeAnalysis as AdaptiveRegimeAnalysis,
+    RegimeParameters,
+    MarketRegime as AdaptiveMarketRegime,
+    VolatilityState,
+    TrendStrength,
+)
+from .position_sizing import (
+    PositionSizingIntelligence,
+    PositionSizeResult,
+    PortfolioRisk,
+    RiskLevel,
+    DrawdownState,
+)
+from .ultimate_intelligence import (
+    UltimateIntelligence,
+    UltimateAnalysis,
+    TradeSetup,
+    IntelligenceSignal,
+    SignalStrength as UltimateSignalStrength,
+    TradeType,
+)
+
 __all__ = [
     # Core consciousness
     "MarketConsciousness",
@@ -145,4 +188,45 @@ __all__ = [
     "CompleteSignalStrength",
     "ConfluenceType",
     "create_complete_intelligence",
+    
+    # Smart Money Concepts (SMC) Intelligence
+    "SMCIntelligence",
+    "SMCAnalysis",
+    "SMCZone",
+    "SwingPoint",
+    "StructureBreakEvent",
+    "StructureType",
+    "ZoneType",
+    "StructureBreak",
+    
+    # Multi-Timeframe (MTF) Intelligence
+    "MTFIntelligence",
+    "MTFConfluence",
+    "TimeframeAnalysis",
+    "TimeframeType",
+    "TrendDirection",
+    "AlignmentType",
+    
+    # Adaptive Regime Intelligence
+    "AdaptiveRegimeIntelligence",
+    "AdaptiveRegimeAnalysis",
+    "RegimeParameters",
+    "AdaptiveMarketRegime",
+    "VolatilityState",
+    "TrendStrength",
+    "DrawdownState",
+    
+    # Position Sizing Intelligence
+    "PositionSizingIntelligence",
+    "PositionSizeResult",
+    "PortfolioRisk",
+    "RiskLevel",
+    
+    # ULTIMATE INTELLIGENCE (THE PINNACLE)
+    "UltimateIntelligence",
+    "UltimateAnalysis",
+    "TradeSetup",
+    "IntelligenceSignal",
+    "UltimateSignalStrength",
+    "TradeType",
 ]
