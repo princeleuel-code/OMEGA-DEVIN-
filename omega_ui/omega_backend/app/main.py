@@ -941,7 +941,46 @@ async def load_sample_data():
     try:
         import pandas as pd
         
+        def _synthetic_bars(symbol: str, n: int, start_price: float) -> List[dict]:
+            """
+            Generate synthetic OHLCV bars for UI demos when CSV data files are missing.
+            This is display-only data and MUST NOT be treated as REAL market data.
+            """
+            # Use hourly bars ending "now" for stable chart spacing.
+            t0 = datetime.now(timezone.utc) - timedelta(hours=n)
+            price = float(start_price)
+            bars: List[dict] = []
+            for i in range(n):
+                ts = (t0 + timedelta(hours=i)).isoformat()
+                open_p = price
+                # Small random walk; volatility scaled by instrument price.
+                step = float(np.random.normal(0.0, 0.0008))
+                close_p = max(0.0001, open_p * (1.0 + step))
+                wick = abs(float(np.random.normal(0.0, 0.0006)))
+                high_p = max(open_p, close_p) * (1.0 + wick)
+                low_p = min(open_p, close_p) * (1.0 - wick)
+                vol = int(np.random.randint(500, 5000))
+                bars.append(
+                    {
+                        "timestamp": ts,
+                        "open": float(open_p),
+                        "high": float(high_p),
+                        "low": float(low_p),
+                        "close": float(close_p),
+                        "volume": vol,
+                    }
+                )
+                price = close_p
+            return bars
+        
         # Load all symbols
+        default_prices = {
+            "EURUSD": 1.0850,
+            "GBPUSD": 1.2650,
+            "USDJPY": 154.50,
+            "AUDUSD": 0.6280,
+            "XAUUSD": 2045.00,
+        }
         symbols_files = {
             "EURUSD": "/home/ubuntu/omega_devin/data/eurusd_hourly_2y.csv",
             "GBPUSD": "/home/ubuntu/omega_devin/data/gbpusd_hourly_2y.csv",
@@ -969,16 +1008,16 @@ async def load_sample_data():
                 state.price_history[symbol] = bars
                 state.current_prices[symbol] = bars[-1]["close"] if bars else 1.08
                 print(f"Loaded {len(bars)} bars for {symbol}")
+            else:
+                # Fall back to synthetic bars so the dashboard can render charts locally.
+                bars = _synthetic_bars(symbol, 500, default_prices.get(symbol, 1.0))
+                state.price_history[symbol] = bars
+                state.current_prices[symbol] = bars[-1]["close"] if bars else default_prices.get(symbol, 1.0)
+                print(f"Generated {len(bars)} synthetic bars for {symbol} (missing CSV: {data_file})")
         
         # Set default prices if files don't exist
         if not state.current_prices:
-            state.current_prices = {
-                "EURUSD": 1.0850,
-                "GBPUSD": 1.2650,
-                "USDJPY": 154.50,
-                "AUDUSD": 0.6280,
-                "XAUUSD": 2045.00
-            }
+            state.current_prices = default_prices.copy()
         
         state.regime = "TRENDING"
         state.confluence_score = 0.72
