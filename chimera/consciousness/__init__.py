@@ -47,6 +47,25 @@ from .unified_intelligence import (
     SignalStrength,
     create_unified_intelligence,
 )
+from .fundamental_intelligence import (
+    FundamentalIntelligence,
+    FundamentalAnalysis,
+    FundamentalHealth,
+    ValuationStatus,
+    ValuationMetrics,
+    FinancialHealthScore,
+    EarningsIntelligence,
+    InsiderActivity,
+    create_fundamental_intelligence,
+)
+from .complete_intelligence import (
+    CompleteIntelligence,
+    CompleteAnalysis,
+    CompleteSignal,
+    CompleteSignalStrength,
+    ConfluenceType,
+    create_complete_intelligence,
+)
 
 __all__ = [
     # Core consciousness
@@ -107,4 +126,23 @@ __all__ = [
     "InformedTradingLevel",
     "SignalStrength",
     "create_unified_intelligence",
+    
+    # Fundamental Intelligence (DEXTER INTEGRATION)
+    "FundamentalIntelligence",
+    "FundamentalAnalysis",
+    "FundamentalHealth",
+    "ValuationStatus",
+    "ValuationMetrics",
+    "FinancialHealthScore",
+    "EarningsIntelligence",
+    "InsiderActivity",
+    "create_fundamental_intelligence",
+    
+    # Complete Intelligence (ULTIMATE INTEGRATION)
+    "CompleteIntelligence",
+    "CompleteAnalysis",
+    "CompleteSignal",
+    "CompleteSignalStrength",
+    "ConfluenceType",
+    "create_complete_intelligence",
 ]
