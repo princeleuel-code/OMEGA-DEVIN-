@@ -147,7 +147,8 @@ class Backtester:
         self,
         data: List[OHLCV],
         genome: StrategyGenome,
-        create_manifest: bool = True
+        create_manifest: bool = True,
+        trade_start_bar: int = 0,
     ) -> BacktestResult:
         """
         Run backtest on data with given strategy genome.
@@ -194,7 +195,21 @@ class Backtester:
         for i, feat in enumerate(features):
             bar_idx = warmup + i
             bar = data[bar_idx]
-            
+
+            # Optional: allow feature warmup / context, but do not trade or count
+            # decisions until trade_start_bar. This is used by purged walk-forward
+            # evaluation to avoid leaking across train/test boundaries.
+            if bar_idx < trade_start_bar:
+                current_equity = self._equity
+                if self._position:
+                    current_equity += self._position.get_pnl(
+                        bar.close,
+                        self.config.pip_value,
+                        self.config.pip_size,
+                    )
+                self._equity_curve.append(current_equity)
+                continue
+
             # Check for position exit first
             if self._position:
                 exit_reason = self._position.check_exit(bar)

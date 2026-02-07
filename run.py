@@ -8,7 +8,11 @@ Command-line interface for running backtests, evolution, and analysis.
 import argparse
 import json
 import logging
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from datetime import datetime
 
@@ -22,8 +26,19 @@ from chimera.evolution.genome import StrategyGenome, create_default_genome, crea
 from chimera.evolution.drq_loop import DRQLoop, DRQConfig, Scenario, EvaluationResult
 from chimera.evolution.behaviors import compute_behavior
 from chimera.evaluation.backtest import Backtester, BacktestConfig, BacktestResult
+from chimera.evaluation.walk_forward import walk_forward, WalkForwardConfig
 from chimera.evaluation.score import Scorer, ScoreCard
+from chimera.evaluation.robustness import (
+    reality_check_bootstrap_max,
+    robustness_report,
+)
 from chimera.core.truth_manifest import TruthManifest
+
+# Sakana-style evolution imports
+from agents.evolution_loop import (
+    EvolutionLoop, EvolutionLoopConfig, EvalConfig, EvolutionConfig,
+    _generate_synthetic_data
+)
 
 
 logging.basicConfig(
@@ -242,6 +257,83 @@ def run_evolution(args):
     return 0
 
 
+def run_walkforward(args):
+    """Run purged walk-forward evaluation (costs always on)."""
+    logger.info("=" * 60)
+    logger.info("OmegaQuant Chimera - Walk-Forward Evaluation")
+    logger.info("=" * 60)
+
+    # Load or create genome
+    if args.genome:
+        logger.info(f"Loading genome from {args.genome}")
+        genome = StrategyGenome.load(args.genome)
+    else:
+        logger.info("Using default genome")
+        genome = create_default_genome()
+
+    # Load or generate data
+    loader = DataLoader(symbol=args.symbol)
+    if args.data:
+        logger.info(f"Loading data from {args.data}")
+        data = loader.load_csv(Path(args.data))
+    else:
+        logger.info(f"Generating {args.bars} bars of synthetic data")
+        if args.regime_data:
+            data = loader.generate_regime_data(num_bars=args.bars)
+        else:
+            data = loader.generate_synthetic(num_bars=args.bars)
+
+    # Integrity check (fail-closed unless --force)
+    checker = IntegrityChecker()
+    integrity = checker.check_series(data)
+    if not integrity.valid and not args.force:
+        logger.error(f"Data integrity check failed: {len(integrity.issues)} issues")
+        logger.error("Use --force to run anyway")
+        return 1
+
+    bt_config = BacktestConfig(
+        initial_capital=args.capital,
+        symbol=args.symbol,
+        spread_pips=args.spread,
+        slippage_pips=args.slippage,
+        commission_per_lot=args.commission,
+    )
+
+    wf_config = WalkForwardConfig(
+        n_folds=args.folds,
+        train_bars=args.train_bars,
+        test_bars=args.test_bars,
+        step_bars=args.step_bars,
+        purge_bars=args.purge_bars,
+        min_trades_per_fold=args.min_trades_per_fold,
+        bootstrap_samples=args.bootstrap,
+    )
+
+    report = walk_forward(data=data, genome=genome, backtest_config=bt_config, wf_config=wf_config)
+
+    print("\n" + "=" * 60)
+    print("WALK-FORWARD REPORT")
+    print("=" * 60)
+    print(f"\nSymbol: {report.symbol}")
+    print(f"Bars: {report.total_bars}")
+    print(f"Folds: {len(report.folds)}")
+    print(f"Verdict: {report.verdict}")
+    print("\n--- Aggregate ---")
+    for k in ["avg_return", "avg_sharpe", "avg_trades", "avg_win_rate", "pass_rate", "return_ci_lower", "return_ci_upper"]:
+        if k in report.aggregate:
+            print(f"{k}: {report.aggregate[k]}")
+
+    # Save results if requested
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report.to_dict(), indent=2))
+        logger.info(f"Wrote walk-forward report to {out}")
+
+    print("\n" + "=" * 60)
+    return 0
+
+
 def run_analyze(args):
     """Analyze a genome or backtest result"""
     logger.info("=" * 60)
@@ -259,6 +351,306 @@ def run_analyze(args):
         print("\n--- Result Analysis ---")
         print(json.dumps(result, indent=2))
     
+    return 0
+
+
+def run_sakana_evolve(args):
+    """Run Sakana-style DGM + DRQ hybrid evolution loop"""
+    logger.info("=" * 60)
+    logger.info("OmegaQuant Chimera - Sakana Evolution (DGM + DRQ)")
+    logger.info("=" * 60)
+    
+    # Generate synthetic data
+    logger.info(f"Generating {args.bars} bars of synthetic data...")
+    data = _generate_synthetic_data(args.bars)
+    logger.info(f"Data generated: {len(data)} bars")
+    
+    # Configure evolution loop
+    loop_config = EvolutionLoopConfig(
+        max_rounds=args.rounds,
+        variants_per_round=args.variants,
+        mutation_rate=args.mutation_rate,
+        mutation_strength=args.mutation_strength,
+        patch_budget=args.patch_budget,
+        output_dir=args.output,
+        canary_trades_required=args.canary_trades,
+        # CLI uses --canary-max-dd but config field is canary_max_dd_pct
+        canary_max_dd_pct=args.canary_max_dd,
+    )
+    
+    eval_config = EvalConfig(
+        train_bars=args.train_bars,
+        test_bars=args.test_bars,
+        n_folds=args.folds,
+        max_drawdown_threshold=args.max_dd,
+        min_sharpe_threshold=args.min_sharpe,
+        max_turnover_threshold=args.max_turnover,
+        stability_threshold=args.stability,
+    )
+    
+    # Create initial config if provided
+    initial_config = None
+    if args.config:
+        with open(args.config) as f:
+            config_dict = json.load(f)
+        initial_config = EvolutionConfig.from_dict(config_dict)
+        logger.info(f"Loaded initial config from {args.config}")
+    
+    # Run evolution
+    logger.info(f"Starting Sakana evolution: {args.rounds} rounds, {args.variants} variants/round")
+    loop = EvolutionLoop(loop_config, eval_config)
+    result = loop.run(data, initial_config=initial_config, max_rounds=args.rounds)
+    
+    # Print results
+    print("\n" + "=" * 60)
+    print("SAKANA EVOLUTION RESULTS")
+    print("=" * 60)
+    
+    print(f"\nRounds Completed: {result['rounds_completed']}")
+    print(f"Total Variants Evaluated: {result['total_variants_evaluated']}")
+    print(f"Archive Size: {result['archive_size']}")
+    print(f"Best Fitness: {result['best_fitness']:.4f}")
+    
+    champion_variant_id = None
+    if getattr(loop, "live_state", None):
+        champion_variant_id = loop.live_state.active_variant_id
+    if champion_variant_id and champion_variant_id != "initial":
+        print(f"\nChampion Variant: {champion_variant_id}")
+    
+    print(f"\nOutput Directory: {args.output}")
+    print("Truth Objects Created:")
+    print("  - RUN_MANIFEST_*.json (provenance)")
+    print("  - VARIANT_PATCH_*.json (config diffs)")
+    print("  - EVAL_REPORT_*.json (walk-forward results)")
+    print("  - ARCHIVE_INDEX.json (MAP-Elites buckets)")
+    print("  - LIVE_GATING_STATE.json (canary/kill-switch)")
+    print("  - CHAMPION_CONFIG.json (active config)")
+    
+    print("\n" + "=" * 60)
+    
+    return 0
+
+
+def run_robustness(args):
+    """
+    Adversarial robustness suite:
+    - permutation test (return-shuffled OHLCV null)
+    - bootstrap-max "reality check" across strategy variants
+    - regime stress test scaffolding (scenario-based; currently synthetic)
+    """
+    logger.info("=" * 60)
+    logger.info("OmegaQuant Chimera - Robustness Suite")
+    logger.info("=" * 60)
+
+    # This command can run many backtests (permutations/variants). Suppress
+    # per-bar decision spam to keep output readable.
+    logging.getLogger("chimera.core.decision_engine").setLevel(logging.ERROR)
+    logging.getLogger("chimera.core.veto_cascade").setLevel(logging.ERROR)
+
+    # Load or generate data
+    loader = DataLoader(symbol=args.symbol)
+    if args.data:
+        logger.info(f"Loading data from {args.data}")
+        data = loader.load_csv(Path(args.data))
+    else:
+        logger.info(f"Generating {args.bars} bars of synthetic data")
+        if args.regime_data:
+            data = loader.generate_regime_data(num_bars=args.bars)
+        else:
+            data = loader.generate_synthetic(num_bars=args.bars)
+
+    # Integrity check (fail-closed unless --force)
+    checker = IntegrityChecker()
+    integrity = checker.check_series(data)
+    if not integrity.valid and not args.force:
+        logger.error(f"Data integrity check failed: {len(integrity.issues)} issues")
+        logger.error("Use --force to run anyway")
+        return 1
+
+    # Backtest config (costs always on via spread)
+    config = BacktestConfig(
+        initial_capital=args.capital,
+        symbol=args.symbol,
+        spread_pips=args.spread,
+    )
+
+    # Strategy set: default genome + random variants
+    genomes = [create_default_genome()]
+    for _ in range(max(0, int(args.variants) - 1)):
+        genomes.append(create_random_genome())
+
+    # Observed + permutation null for the default genome
+    perm_report = robustness_report(
+        bars=data,
+        genome=genomes[0],
+        backtest_config=config,
+        permutations=args.permutations,
+        seed=args.seed,
+    )
+
+    # Bootstrap-max reality check across variants
+    backtester = Backtester(config=config)
+    series = []
+    for g in genomes:
+        res = backtester.run(data, g, create_manifest=False)
+        eq = res.equity_curve
+        rets = []
+        for i in range(1, len(eq)):
+            prev = eq[i - 1]
+            cur = eq[i]
+            rets.append(0.0 if prev == 0 else (cur - prev) / prev)
+        series.append(rets)
+
+    rc = reality_check_bootstrap_max(
+        series,
+        bootstrap_samples=args.bootstrap,
+        seed=args.seed,
+    )
+
+    report = {
+        "symbol": args.symbol,
+        "bars": len(data),
+        "config": {
+            "spread_pips": args.spread,
+            "permutations": args.permutations,
+            "variants": args.variants,
+            "bootstrap": args.bootstrap,
+            "seed": args.seed,
+        },
+        "permutation_test": perm_report,
+        "reality_check": {
+            "observed_best_metric": rc.observed_best_metric,
+            "p_value": rc.p_value,
+            "strategies": rc.strategies,
+            "bootstrap_samples": rc.bootstrap_samples,
+        },
+        "note": (
+            "This report is a robustness aid, not a performance guarantee. "
+            "Permutation nulls are synthetic unless real data is provided."
+        ),
+    }
+
+    print("\n" + "=" * 60)
+    print("ROBUSTNESS REPORT")
+    print("=" * 60)
+    print(f"\nSymbol: {report['symbol']}")
+    print(f"Bars: {report['bars']}")
+    print("\n--- Permutation Test (Return) ---")
+    p_perm = report["permutation_test"]["permutation_null"]["p_value_return"]
+    print(f"p_value_return: {p_perm}")
+    print("\n--- Reality Check (Bootstrap-Max) ---")
+    print(f"p_value: {report['reality_check']['p_value']}")
+    print("\n" + "=" * 60)
+
+    if args.output:
+        out = Path(args.output)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(report, indent=2))
+        logger.info(f"Wrote robustness report to {out}")
+
+    return 0
+
+
+def run_verify(args) -> int:
+    """
+    Unified verifier entrypoint (SSOT: CODEX_CONTEXT_PACK.md §7.8).
+
+    Runs a minimal, reproducible suite:
+    - compileall
+    - unittest
+    - CLI smoke (backtest + walkforward)
+    - optional frontend lint/build (skippable)
+    """
+
+    repo_root = Path(__file__).parent.resolve()
+
+    env = dict(os.environ)
+    env.setdefault("PYTHONPYCACHEPREFIX", "/tmp/omega_pycache")
+
+    def _run(cmd: list[str], *, cwd: Path) -> int:
+        logger.info("verify: %s (cwd=%s)", " ".join(cmd), cwd)
+        p = subprocess.run(cmd, cwd=str(cwd), env=env)
+        return int(p.returncode)
+
+    # 1) Python compile check
+    rc = _run([sys.executable, "-m", "compileall", "-q", str(repo_root)], cwd=repo_root)
+    if rc != 0:
+        return rc
+
+    # 2) Unit tests
+    rc = _run([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], cwd=repo_root)
+    if rc != 0:
+        return rc
+
+    # 3) CLI smokes
+    tmp = Path(tempfile.gettempdir())
+    rc = _run(
+        [
+            sys.executable,
+            str(repo_root / "run.py"),
+            "backtest",
+            "--bars",
+            "50",
+            "--regime-data",
+            "--spread",
+            "1.0",
+            "--output",
+            str(tmp / "omega_verify_backtest.json"),
+        ],
+        cwd=repo_root,
+    )
+    if rc != 0:
+        return rc
+
+    rc = _run(
+        [
+            sys.executable,
+            str(repo_root / "run.py"),
+            "walkforward",
+            "--bars",
+            "300",
+            "--regime-data",
+            "--spread",
+            "1.0",
+            "--folds",
+            "2",
+            "--train-bars",
+            "100",
+            "--test-bars",
+            "50",
+            "--purge-bars",
+            "5",
+            "--bootstrap",
+            "50",
+            "--output",
+            str(tmp / "omega_verify_wf.json"),
+        ],
+        cwd=repo_root,
+    )
+    if rc != 0:
+        return rc
+
+    # 4) Optional frontend checks (canonical UI only)
+    if not getattr(args, "skip_frontend", False):
+        npm = shutil.which("npm")
+        if not npm:
+            logger.warning("verify: npm not found; skipping frontend lint/build")
+            return 0
+
+        fe_root = repo_root / "omega_frontend"
+        if getattr(args, "npm_ci", False):
+            rc = _run([npm, "ci", "--no-audit", "--no-fund"], cwd=fe_root)
+            if rc != 0:
+                return rc
+
+        rc = _run([npm, "run", "lint"], cwd=fe_root)
+        if rc != 0:
+            return rc
+
+        rc = _run([npm, "run", "build"], cwd=fe_root)
+        if rc != 0:
+            return rc
+
     return 0
 
 
@@ -299,6 +691,75 @@ def main():
     analyze_parser.add_argument("--genome", "-g", help="Path to genome JSON file")
     analyze_parser.add_argument("--result", "-r", help="Path to result JSON file")
     
+    # Sakana evolution command (DGM + DRQ hybrid)
+    sakana_parser = subparsers.add_parser("sakana-evolve", help="Run Sakana-style DGM + DRQ evolution")
+    sakana_parser.add_argument("--bars", "-b", type=int, default=1000, help="Total bars of data")
+    sakana_parser.add_argument("--rounds", "-r", type=int, default=10, help="Number of evolution rounds")
+    sakana_parser.add_argument("--variants", "-v", type=int, default=5, help="Variants per round")
+    sakana_parser.add_argument("--train-bars", type=int, default=200, help="Training bars per fold")
+    sakana_parser.add_argument("--test-bars", type=int, default=100, help="Test bars per fold")
+    sakana_parser.add_argument("--folds", type=int, default=3, help="Number of walk-forward folds")
+    sakana_parser.add_argument("--mutation-rate", type=float, default=0.2, help="Mutation rate")
+    sakana_parser.add_argument("--mutation-strength", type=float, default=0.15, help="Mutation strength")
+    sakana_parser.add_argument("--patch-budget", type=int, default=5, help="Max params to mutate per variant")
+    sakana_parser.add_argument("--max-dd", type=float, default=15.0, help="Max drawdown threshold (%%)")
+    sakana_parser.add_argument("--min-sharpe", type=float, default=0.0, help="Min Sharpe threshold")
+    sakana_parser.add_argument("--max-turnover", type=float, default=50.0, help="Max turnover threshold")
+    sakana_parser.add_argument("--stability", type=float, default=10.0, help="Max stability (return std) threshold")
+    sakana_parser.add_argument("--canary-trades", type=int, default=10, help="Trades required in canary mode")
+    sakana_parser.add_argument("--canary-max-dd", type=float, default=5.0, help="Max DD in canary mode (%%)")
+    sakana_parser.add_argument("--config", "-c", help="Path to initial config JSON")
+    sakana_parser.add_argument("--output", "-o", default="./evolution_output", help="Output directory")
+
+    # Walk-forward evaluation (purged)
+    wf_parser = subparsers.add_parser("walkforward", help="Run purged walk-forward evaluation")
+    wf_parser.add_argument("--genome", "-g", help="Path to genome JSON file")
+    wf_parser.add_argument("--data", "-d", help="Path to data CSV file")
+    wf_parser.add_argument("--symbol", "-s", default="EURUSD", help="Symbol to trade")
+    wf_parser.add_argument("--bars", "-b", type=int, default=2000, help="Number of bars for synthetic data")
+    wf_parser.add_argument("--capital", "-c", type=float, default=10000, help="Initial capital")
+    wf_parser.add_argument("--spread", type=float, default=1.0, help="Spread in pips (must be > 0)")
+    wf_parser.add_argument("--slippage", type=float, default=0.5, help="Slippage in pips")
+    wf_parser.add_argument("--commission", type=float, default=0.0, help="Commission per lot")
+    wf_parser.add_argument("--regime-data", action="store_true", help="Generate data with regime changes")
+    wf_parser.add_argument("--force", "-f", action="store_true", help="Run even if data integrity fails")
+    wf_parser.add_argument("--folds", type=int, default=5, help="Number of walk-forward folds")
+    wf_parser.add_argument("--train-bars", type=int, default=250, help="Training bars per fold")
+    wf_parser.add_argument("--test-bars", type=int, default=125, help="Test bars per fold")
+    wf_parser.add_argument("--step-bars", type=int, default=0, help="Step size between folds (0 = test-bars)")
+    wf_parser.add_argument("--purge-bars", type=int, default=5, help="Purge gap between train/test (bars)")
+    wf_parser.add_argument("--min-trades-per-fold", type=int, default=3, help="Minimum trades required per fold")
+    wf_parser.add_argument("--bootstrap", type=int, default=1000, help="Bootstrap samples for CI on avg return")
+    wf_parser.add_argument("--output", "-o", help="Output path for report JSON")
+
+    # Robustness suite (permutation tests + bootstrap-max reality check)
+    rb_parser = subparsers.add_parser("robustness", help="Run robustness suite (permutation + reality check)")
+    rb_parser.add_argument("--data", "-d", help="Path to data CSV file")
+    rb_parser.add_argument("--symbol", "-s", default="EURUSD", help="Symbol to trade")
+    rb_parser.add_argument("--bars", "-b", type=int, default=500, help="Number of bars for synthetic data")
+    rb_parser.add_argument("--capital", "-c", type=float, default=10000, help="Initial capital")
+    rb_parser.add_argument("--spread", type=float, default=1.0, help="Spread in pips (must be > 0)")
+    rb_parser.add_argument("--regime-data", action="store_true", help="Generate data with regime changes")
+    rb_parser.add_argument("--force", "-f", action="store_true", help="Run even if data integrity fails")
+    rb_parser.add_argument("--permutations", type=int, default=200, help="Permutation runs for null distribution")
+    rb_parser.add_argument("--variants", type=int, default=10, help="Strategy variants for reality check")
+    rb_parser.add_argument("--bootstrap", type=int, default=500, help="Bootstrap samples for reality check")
+    rb_parser.add_argument("--seed", type=int, default=1337, help="RNG seed")
+    rb_parser.add_argument("--output", "-o", help="Output path for robustness JSON")
+
+    # Unified verifier entrypoint
+    verify_parser = subparsers.add_parser("verify", help="Run the unified verifier suite")
+    verify_parser.add_argument(
+        "--skip-frontend",
+        action="store_true",
+        help="Skip frontend lint/build (useful for Python-only environments)",
+    )
+    verify_parser.add_argument(
+        "--npm-ci",
+        action="store_true",
+        help="Run `npm ci` in the canonical frontend before lint/build",
+    )
+    
     args = parser.parse_args()
     
     if args.command == "backtest":
@@ -307,6 +768,17 @@ def main():
         return run_evolution(args)
     elif args.command == "analyze":
         return run_analyze(args)
+    elif args.command == "sakana-evolve":
+        return run_sakana_evolve(args)
+    elif args.command == "walkforward":
+        # Normalize step-bars default.
+        if getattr(args, "step_bars", 0) == 0:
+            args.step_bars = args.test_bars
+        return run_walkforward(args)
+    elif args.command == "robustness":
+        return run_robustness(args)
+    elif args.command == "verify":
+        return run_verify(args)
     else:
         parser.print_help()
         return 1
