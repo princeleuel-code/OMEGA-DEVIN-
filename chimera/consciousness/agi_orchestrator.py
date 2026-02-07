@@ -36,11 +36,11 @@ from .ultimate_intelligence import UltimateIntelligence
 from .vpe_intelligence import VPEIntelligence
 from .smc_intelligence import SMCIntelligence
 from .mtf_intelligence import MTFIntelligence
-from .adaptive_regime import AdaptiveRegime
-from .position_sizing import PositionSizing
-from .session_trade_management import SessionTradeManagement
+from .adaptive_regime import AdaptiveRegimeIntelligence as AdaptiveRegime
+from .position_sizing import PositionSizingIntelligence as PositionSizing
+from .session_trade_management import SessionTradeManagementIntelligence as SessionTradeManagement
 from .institutional_flow_detection import InstitutionalFlowDetection
-from .cross_asset_correlation import CrossAssetCorrelation
+from .cross_asset_correlation import CrossAssetCorrelationIntelligence as CrossAssetCorrelation
 from .fractal_swing_intelligence import FractalSwingIntelligence
 from .manipulation_candle_intelligence import ManipulationCandleIntelligence
 from .multi_profile_volume_intelligence import MultiProfileVolumeIntelligence
