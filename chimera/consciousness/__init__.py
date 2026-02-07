@@ -213,6 +213,47 @@ from .cross_asset_correlation import (
     DivergenceType,
 )
 
+# UNMATCHABLE: Trading AGI - The Ultimate Self-Evolving Intelligence
+from .trading_agi import (
+    TradingAGI,
+    get_trading_agi,
+    run_agi_cycle,
+    run_evolution_cycle,
+    ThoughtChain,
+    CodeImprovement,
+    EvolutionGenome,
+    AGIMode,
+    ReasoningDepth,
+    ReasoningEngine,
+    CodeWriterEngine,
+    EvolutionEngine,
+    MarketAnalyzer,
+)
+
+# UNMATCHABLE: AGI Orchestrator - The Central Brain
+from .agi_orchestrator import (
+    AGIOrchestrator,
+    get_orchestrator,
+    run_agi_analysis,
+    run_agi_learning,
+    run_agi_evolution,
+    get_agi_status,
+    AGIState,
+    AGIDecision,
+    LearningEvent,
+    ClawdbotIntegration,
+)
+
+# UNMATCHABLE: Self-Evolution Loop - Autonomous Improvement
+from .self_evolution_loop import (
+    SelfEvolutionLoop,
+    get_evolution_loop,
+    run_self_evolution,
+    EvolutionPhase as SelfEvolutionPhase,
+    EvolutionCandidate,
+    EvolutionCycle,
+)
+
 __all__ = [
     # Core consciousness
     "MarketConsciousness",
@@ -425,4 +466,39 @@ __all__ = [
     "MarketSentiment",
     "CorrelationStrength",
     "DivergenceType",
+    
+    # UNMATCHABLE: Trading AGI - The Ultimate Self-Evolving Intelligence
+    "TradingAGI",
+    "get_trading_agi",
+    "run_agi_cycle",
+    "run_evolution_cycle",
+    "ThoughtChain",
+    "CodeImprovement",
+    "EvolutionGenome",
+    "AGIMode",
+    "ReasoningDepth",
+    "ReasoningEngine",
+    "CodeWriterEngine",
+    "EvolutionEngine",
+    "MarketAnalyzer",
+    
+    # UNMATCHABLE: AGI Orchestrator - The Central Brain
+    "AGIOrchestrator",
+    "get_orchestrator",
+    "run_agi_analysis",
+    "run_agi_learning",
+    "run_agi_evolution",
+    "get_agi_status",
+    "AGIState",
+    "AGIDecision",
+    "LearningEvent",
+    "ClawdbotIntegration",
+    
+    # UNMATCHABLE: Self-Evolution Loop - Autonomous Improvement
+    "SelfEvolutionLoop",
+    "get_evolution_loop",
+    "run_self_evolution",
+    "SelfEvolutionPhase",
+    "EvolutionCandidate",
+    "EvolutionCycle",
 ]
