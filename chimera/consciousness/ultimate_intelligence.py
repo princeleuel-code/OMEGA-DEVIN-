@@ -24,6 +24,7 @@ from .smc_intelligence import SMCIntelligence, SMCAnalysis, StructureType, ZoneT
 from .mtf_intelligence import MTFIntelligence, MTFConfluence, TimeframeType, TrendDirection, AlignmentType
 from .adaptive_regime import AdaptiveRegimeIntelligence, RegimeAnalysis, MarketRegime
 from .position_sizing import PositionSizingIntelligence, PositionSizeResult, RiskLevel
+from .vpe_intelligence import VPEIntelligence, VPEAnalysis, VPShape
 
 
 class SignalStrength(Enum):
@@ -205,13 +206,15 @@ class UltimateIntelligence:
     """
     
     # Signal weights for different intelligence sources
+    # ALL-KNOWING: Uses BEST parts of ALL systems together
     SIGNAL_WEIGHTS = {
-        "smc": 0.25,  # Smart Money Concepts
-        "mtf": 0.25,  # Multi-Timeframe
-        "regime": 0.15,  # Regime Detection
-        "delta": 0.15,  # Delta Print (if available)
-        "consciousness": 0.10,  # Market Consciousness
-        "fundamental": 0.10  # Fundamental (if available)
+        "smc": 0.20,  # Smart Money Concepts - Order blocks, FVGs, liquidity
+        "mtf": 0.20,  # Multi-Timeframe - HTF/LTF alignment
+        "vpe": 0.20,  # Volume Profile Edge - POC, VAH, VAL, signal candles
+        "regime": 0.12,  # Regime Detection - Market state adaptation
+        "delta": 0.12,  # Delta Print - Orderflow analysis
+        "consciousness": 0.08,  # Market Consciousness - AI reasoning
+        "fundamental": 0.08  # Fundamental - Financials, valuation
     }
     
     # Minimum confidence thresholds
@@ -233,9 +236,10 @@ class UltimateIntelligence:
             risk_level: Risk tolerance level
             base_risk_per_trade: Base risk per trade as decimal
         """
-        # Initialize all intelligence modules
+        # Initialize all intelligence modules - ALL-KNOWING system
         self.smc = SMCIntelligence()
         self.mtf = MTFIntelligence()
+        self.vpe = VPEIntelligence()  # Volume Profile Edge - Forest Knight's system
         self.regime = AdaptiveRegimeIntelligence()
         self.position_sizer = PositionSizingIntelligence(
             account_balance=account_balance,
@@ -288,7 +292,15 @@ class UltimateIntelligence:
             signals.append(mtf_signal)
             reasoning.append(f"MTF: {mtf_confluence.alignment.value} alignment ({mtf_confluence.alignment_score:.0%})")
         
-        # 3. Regime Analysis
+        # 3. Volume Profile Edge Analysis (Forest Knight's system)
+        vpe_analysis = None
+        if len(bars) >= 50:
+            vpe_analysis = self.vpe.analyze(bars)
+            vpe_signal = self._process_vpe_signal(vpe_analysis)
+            signals.append(vpe_signal)
+            reasoning.append(f"VPE: {vpe_analysis.market_bias} bias, VP shape: {vpe_analysis.session_vp.shape.value}")
+        
+        # 4. Regime Analysis
         regime_analysis = None
         if len(bars) >= 200:
             regime_analysis = self.regime.analyze(bars)
@@ -296,19 +308,19 @@ class UltimateIntelligence:
             signals.append(regime_signal)
             reasoning.append(f"Regime: {regime_analysis.current_regime.value} ({regime_analysis.regime_confidence:.0%})")
         
-        # 4. Delta Print Analysis (if provided)
+        # 6. Delta Print Analysis (if provided)
         if delta_analysis:
             delta_signal = self._process_delta_signal(delta_analysis)
             signals.append(delta_signal)
             reasoning.append(f"Delta: {delta_analysis.get('bias', 'neutral')} pressure")
         
-        # 5. Market Consciousness Analysis (if provided)
+        # 7. Market Consciousness Analysis (if provided)
         if consciousness_analysis:
             consciousness_signal = self._process_consciousness_signal(consciousness_analysis)
             signals.append(consciousness_signal)
             reasoning.append(f"Consciousness: {consciousness_analysis.get('signal', 'neutral')}")
         
-        # 6. Fundamental Analysis (if provided)
+        # 8. Fundamental Analysis (if provided)
         if fundamental_analysis:
             fundamental_signal = self._process_fundamental_signal(fundamental_analysis)
             signals.append(fundamental_signal)
@@ -467,6 +479,59 @@ class UltimateIntelligence:
             confidence=confluence.confidence,
             reasoning=f"Alignment: {confluence.alignment.value}, HTF: {confluence.htf_score:+.2f}",
             weight=self.SIGNAL_WEIGHTS["mtf"]
+        )
+    
+    def _process_vpe_signal(self, analysis: VPEAnalysis) -> IntelligenceSignal:
+        """Process VPE (Volume Profile Edge) analysis into signal - Forest Knight's system"""
+        # Determine direction from market bias and trade setup
+        if analysis.market_bias == "bullish":
+            direction = "LONG"
+        elif analysis.market_bias == "bearish":
+            direction = "SHORT"
+        else:
+            # Check trade setup for direction
+            if analysis.trade_setup and analysis.trade_setup.direction.lower() == "long":
+                direction = "LONG"
+            elif analysis.trade_setup and analysis.trade_setup.direction.lower() == "short":
+                direction = "SHORT"
+            else:
+                direction = "NEUTRAL"
+        
+        # Calculate strength from VP shape and signal candles
+        strength = 0.5
+        
+        # VP shape bias
+        if analysis.session_vp.shape == VPShape.P_SHAPED:
+            strength += 0.15 if direction == "LONG" else -0.1
+        elif analysis.session_vp.shape == VPShape.B_SHAPED:
+            strength += 0.15 if direction == "SHORT" else -0.1
+        
+        # Signal candles at key levels boost strength
+        strong_signals = sum(1 for sc in analysis.signal_candles if sc.at_key_level and sc.volume_ratio > 1.5)
+        strength += min(0.2, strong_signals * 0.05)
+        
+        # Trade setup confidence
+        if analysis.trade_setup:
+            strength = max(strength, analysis.trade_setup.confidence)
+        
+        strength = max(0.1, min(1.0, strength))
+        
+        # Build reasoning
+        reasoning_parts = [
+            f"VP shape: {analysis.session_vp.shape.value}",
+            f"POC: {analysis.session_vp.poc:.5f}",
+            f"Zone: {analysis.current_zone}",
+        ]
+        if analysis.trade_setup:
+            reasoning_parts.append(f"Setup: {analysis.trade_setup.setup_type}")
+        
+        return IntelligenceSignal(
+            source="vpe",
+            direction=direction,
+            strength=strength,
+            confidence=strength,
+            reasoning=", ".join(reasoning_parts),
+            weight=self.SIGNAL_WEIGHTS["vpe"]
         )
     
     def _process_regime_signal(self, analysis: RegimeAnalysis) -> IntelligenceSignal:
