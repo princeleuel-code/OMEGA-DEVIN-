@@ -109,6 +109,18 @@ from .ultimate_intelligence import (
     SignalStrength as UltimateSignalStrength,
     TradeType,
 )
+from .vpe_intelligence import (
+    VPEIntelligence,
+    VPEAnalysis,
+    VolumeProfile,
+    VolumeNode,
+    KeyLevel,
+    SignalCandle,
+    VPETradeSetup,
+    VPShape,
+    CandlePattern,
+    SignalStrength as VPESignalStrength,
+)
 
 __all__ = [
     # Core consciousness
@@ -229,4 +241,16 @@ __all__ = [
     "IntelligenceSignal",
     "UltimateSignalStrength",
     "TradeType",
+    
+    # VPE INTELLIGENCE (FOREST KNIGHT'S 7-FIGURE SYSTEM)
+    "VPEIntelligence",
+    "VPEAnalysis",
+    "VolumeProfile",
+    "VolumeNode",
+    "KeyLevel",
+    "SignalCandle",
+    "VPETradeSetup",
+    "VPShape",
+    "CandlePattern",
+    "VPESignalStrength",
 ]
