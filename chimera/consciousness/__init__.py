@@ -122,6 +122,42 @@ from .vpe_intelligence import (
     SignalStrength as VPESignalStrength,
 )
 
+# NEW: 3 Trader YouTube Transcript Intelligence Modules
+from .fractal_swing_intelligence import (
+    FractalSwingIntelligence,
+    FractalSwingAnalysis,
+    SwingPoint as FractalSwingPoint,
+    PreviousRange,
+    ProminentWick,
+    LiquiditySweep,
+    RoundingPattern,
+    SwingDirection,
+    RoundingType,
+    SweepType,
+)
+from .manipulation_candle_intelligence import (
+    ManipulationCandleIntelligence,
+    ManipulationAnalysis,
+    ManipulationCandle,
+    AbsorptionZone,
+    DeltaAnalysis as ManipulationDeltaAnalysis,
+    SessionProfile,
+    ManipulationType,
+    SessionType,
+    DeltaDirection,
+)
+from .multi_profile_volume_intelligence import (
+    MultiProfileVolumeIntelligence,
+    MultiProfileAnalysis,
+    VolumeProfile as MultiVolumeProfile,
+    VolumeLevel,
+    InstitutionalZone,
+    ProfileConfluence,
+    ProfileType,
+    ProfileShape,
+    ZoneType as InstitutionalZoneType,
+)
+
 __all__ = [
     # Core consciousness
     "MarketConsciousness",
@@ -253,4 +289,38 @@ __all__ = [
     "VPShape",
     "CandlePattern",
     "VPESignalStrength",
+    
+    # FRACTAL SWING INTELLIGENCE (Dave's 4-6 Swing Rule)
+    "FractalSwingIntelligence",
+    "FractalSwingAnalysis",
+    "FractalSwingPoint",
+    "PreviousRange",
+    "ProminentWick",
+    "LiquiditySweep",
+    "RoundingPattern",
+    "SwingDirection",
+    "RoundingType",
+    "SweepType",
+    
+    # MANIPULATION CANDLE INTELLIGENCE (Funded Brothers)
+    "ManipulationCandleIntelligence",
+    "ManipulationAnalysis",
+    "ManipulationCandle",
+    "AbsorptionZone",
+    "ManipulationDeltaAnalysis",
+    "SessionProfile",
+    "ManipulationType",
+    "SessionType",
+    "DeltaDirection",
+    
+    # MULTI-PROFILE VOLUME INTELLIGENCE (5 Volume Profiles)
+    "MultiProfileVolumeIntelligence",
+    "MultiProfileAnalysis",
+    "MultiVolumeProfile",
+    "VolumeLevel",
+    "InstitutionalZone",
+    "ProfileConfluence",
+    "ProfileType",
+    "ProfileShape",
+    "InstitutionalZoneType",
 ]

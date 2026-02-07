@@ -26,6 +26,11 @@ from .adaptive_regime import AdaptiveRegimeIntelligence, RegimeAnalysis, MarketR
 from .position_sizing import PositionSizingIntelligence, PositionSizeResult, RiskLevel
 from .vpe_intelligence import VPEIntelligence, VPEAnalysis, VPShape
 
+# NEW: Import Transcript-based Intelligence Modules (3 Trader YouTube Transcripts)
+from .fractal_swing_intelligence import FractalSwingIntelligence, FractalSwingAnalysis, SwingDirection
+from .manipulation_candle_intelligence import ManipulationCandleIntelligence, ManipulationAnalysis, ManipulationType
+from .multi_profile_volume_intelligence import MultiProfileVolumeIntelligence, MultiProfileAnalysis, ProfileShape
+
 
 class SignalStrength(Enum):
     """Signal strength levels"""
@@ -207,14 +212,18 @@ class UltimateIntelligence:
     
     # Signal weights for different intelligence sources
     # ALL-KNOWING: Uses BEST parts of ALL systems together
+    # Updated with 3 Trader YouTube Transcript Intelligence
     SIGNAL_WEIGHTS = {
-        "smc": 0.20,  # Smart Money Concepts - Order blocks, FVGs, liquidity
-        "mtf": 0.20,  # Multi-Timeframe - HTF/LTF alignment
-        "vpe": 0.20,  # Volume Profile Edge - POC, VAH, VAL, signal candles
-        "regime": 0.12,  # Regime Detection - Market state adaptation
-        "delta": 0.12,  # Delta Print - Orderflow analysis
-        "consciousness": 0.08,  # Market Consciousness - AI reasoning
-        "fundamental": 0.08  # Fundamental - Financials, valuation
+        "smc": 0.15,  # Smart Money Concepts - Order blocks, FVGs, liquidity
+        "mtf": 0.15,  # Multi-Timeframe - HTF/LTF alignment
+        "vpe": 0.15,  # Volume Profile Edge - POC, VAH, VAL, signal candles
+        "fractal_swing": 0.12,  # NEW: Fractal Swing - 4-6 swing rule, previous range, rounding
+        "manipulation": 0.12,  # NEW: Manipulation Candle - absorption, traps, sweep detection
+        "multi_profile": 0.10,  # NEW: Multi-Profile Volume - week/day/session profiles
+        "regime": 0.08,  # Regime Detection - Market state adaptation
+        "delta": 0.06,  # Delta Print - Orderflow analysis
+        "consciousness": 0.04,  # Market Consciousness - AI reasoning
+        "fundamental": 0.03  # Fundamental - Financials, valuation
     }
     
     # Minimum confidence thresholds
@@ -246,6 +255,11 @@ class UltimateIntelligence:
             risk_level=risk_level,
             base_risk_per_trade=base_risk_per_trade
         )
+        
+        # NEW: Initialize Transcript-based Intelligence Modules (3 Trader YouTube Transcripts)
+        self.fractal_swing = FractalSwingIntelligence()  # Dave's 4-6 swing rule, previous range
+        self.manipulation = ManipulationCandleIntelligence()  # Funded Brothers manipulation candles
+        self.multi_profile = MultiProfileVolumeIntelligence()  # Multi-profile volume analysis
         
         self.account_balance = account_balance
     
@@ -308,7 +322,37 @@ class UltimateIntelligence:
             signals.append(regime_signal)
             reasoning.append(f"Regime: {regime_analysis.current_regime.value} ({regime_analysis.regime_confidence:.0%})")
         
-        # 6. Delta Print Analysis (if provided)
+        # 5. NEW: Fractal Swing Intelligence (Dave's 4-6 swing rule)
+        fractal_analysis = None
+        if len(bars) >= 50:
+            fractal_analysis = self.fractal_swing.analyze(bars)
+            fractal_signal = self._process_fractal_swing_signal(fractal_analysis)
+            signals.append(fractal_signal)
+            reasoning.append(f"Fractal Swing: {fractal_analysis.signal} ({fractal_analysis.swing_count} swings, {'ready for reversal' if fractal_analysis.ready_for_reversal else 'not ready'})")
+        
+        # 6. NEW: Manipulation Candle Intelligence (Funded Brothers)
+        manipulation_analysis = None
+        if len(bars) >= 20:
+            manipulation_analysis = self.manipulation.analyze(bars)
+            manipulation_signal = self._process_manipulation_signal(manipulation_analysis)
+            signals.append(manipulation_signal)
+            if manipulation_analysis.trap_detected:
+                reasoning.append(f"Manipulation: {manipulation_analysis.signal} (TRAP DETECTED: {manipulation_analysis.trap_direction} traders trapped)")
+            else:
+                reasoning.append(f"Manipulation: {manipulation_analysis.signal} ({manipulation_analysis.delta_direction.value})")
+        
+        # 7. NEW: Multi-Profile Volume Intelligence
+        multi_profile_analysis = None
+        if len(bars) >= 50:
+            multi_profile_analysis = self.multi_profile.analyze(bars)
+            multi_profile_signal = self._process_multi_profile_signal(multi_profile_analysis)
+            signals.append(multi_profile_signal)
+            if multi_profile_analysis.strongest_confluence:
+                reasoning.append(f"Multi-Profile: {multi_profile_analysis.signal} (confluence at {multi_profile_analysis.strongest_confluence.price_level:.5f})")
+            else:
+                reasoning.append(f"Multi-Profile: {multi_profile_analysis.signal}")
+        
+        # 8. Delta Print Analysis (if provided)
         if delta_analysis:
             delta_signal = self._process_delta_signal(delta_analysis)
             signals.append(delta_signal)
@@ -613,6 +657,113 @@ class UltimateIntelligence:
             confidence=strength,
             reasoning=f"Fundamental bias: {bias}",
             weight=self.SIGNAL_WEIGHTS["fundamental"]
+        )
+    
+    def _process_fractal_swing_signal(self, analysis: FractalSwingAnalysis) -> IntelligenceSignal:
+        """
+        Process Fractal Swing analysis into signal
+        
+        Based on Dave's 4-6 swing rule:
+        - Count swings to POI (4-6 swings before reversal)
+        - Trade pullbacks to previous range (30/50/70%)
+        - Confirm liquidity sweeps before entry
+        """
+        direction = analysis.signal
+        
+        # Boost strength if ready for reversal and sweep confirmed
+        strength = analysis.signal_strength
+        if analysis.ready_for_reversal:
+            strength = min(1.0, strength * 1.2)
+        if analysis.sweep_confirmed:
+            strength = min(1.0, strength * 1.15)
+        if analysis.in_retracement_zone:
+            strength = min(1.0, strength * 1.1)
+        
+        reasoning_parts = [f"{analysis.swing_count} swings"]
+        if analysis.ready_for_reversal:
+            reasoning_parts.append("ready for reversal")
+        if analysis.sweep_confirmed:
+            reasoning_parts.append("sweep confirmed")
+        if analysis.in_retracement_zone:
+            reasoning_parts.append(f"in {analysis.retracement_level} zone")
+        
+        return IntelligenceSignal(
+            source="fractal_swing",
+            direction=direction,
+            strength=strength,
+            confidence=analysis.confidence,
+            reasoning=f"Fractal: {', '.join(reasoning_parts)}",
+            weight=self.SIGNAL_WEIGHTS["fractal_swing"]
+        )
+    
+    def _process_manipulation_signal(self, analysis: ManipulationAnalysis) -> IntelligenceSignal:
+        """
+        Process Manipulation Candle analysis into signal
+        
+        Based on Funded Brothers strategy:
+        - Detect manipulation candles that trap traders
+        - Trade AGAINST trapped traders
+        - Use absorption zones for tighter stops
+        """
+        direction = analysis.signal
+        strength = analysis.signal_strength
+        
+        # Boost strength if trap detected (high confidence signal)
+        if analysis.trap_detected:
+            strength = min(1.0, strength * 1.25)
+        
+        # Boost if recent manipulation candle
+        if analysis.recent_manipulation:
+            strength = min(1.0, strength * 1.1)
+        
+        reasoning_parts = [analysis.delta_direction.value]
+        if analysis.trap_detected:
+            reasoning_parts.append(f"{analysis.trap_direction} trapped")
+        if analysis.recent_manipulation:
+            reasoning_parts.append(analysis.recent_manipulation.manipulation_type.value)
+        
+        return IntelligenceSignal(
+            source="manipulation",
+            direction=direction,
+            strength=strength,
+            confidence=analysis.confidence,
+            reasoning=f"Manipulation: {', '.join(reasoning_parts)}",
+            weight=self.SIGNAL_WEIGHTS["manipulation"]
+        )
+    
+    def _process_multi_profile_signal(self, analysis: MultiProfileAnalysis) -> IntelligenceSignal:
+        """
+        Process Multi-Profile Volume analysis into signal
+        
+        Based on Funded Brothers strategy:
+        - Use 5 volume profiles (previous week, day, current week, day, session)
+        - Find POC, VAH, VAL confluences
+        - Identify institutional supply/demand zones
+        """
+        direction = analysis.signal
+        strength = analysis.signal_strength
+        
+        # Boost strength if strong confluence
+        if analysis.strongest_confluence and analysis.strongest_confluence.num_profiles >= 3:
+            strength = min(1.0, strength * 1.2)
+        
+        # Boost if near institutional zone
+        if analysis.nearest_demand or analysis.nearest_supply:
+            strength = min(1.0, strength * 1.1)
+        
+        reasoning_parts = []
+        if analysis.strongest_confluence:
+            reasoning_parts.append(f"{analysis.strongest_confluence.num_profiles}-profile confluence")
+        if analysis.session and analysis.session.shape:
+            reasoning_parts.append(f"session {analysis.session.shape.value}")
+        
+        return IntelligenceSignal(
+            source="multi_profile",
+            direction=direction,
+            strength=strength,
+            confidence=analysis.confidence,
+            reasoning=f"Multi-Profile: {', '.join(reasoning_parts) if reasoning_parts else 'analyzing'}",
+            weight=self.SIGNAL_WEIGHTS["multi_profile"]
         )
     
     def _calculate_confluence_score(self, signals: List[IntelligenceSignal]) -> float:
