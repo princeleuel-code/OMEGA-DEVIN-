@@ -1377,7 +1377,7 @@ const UnifiedIntelligence = ({
       </div>
 
       {/* NEURAL CONNECTIONS - How signals connect */}
-      <div className="bg-[#0f1420] rounded-xl p-3 border border-slate-700">
+      <div className="bg-[#0a0a0a] rounded-xl p-3 border border-slate-700">
         <div className="flex items-center gap-2 mb-3">
           <Network className="w-4 h-4 text-purple-400" />
           <span className="text-xs font-bold text-slate-300">SIGNAL CONFLUENCE</span>
@@ -1405,7 +1405,7 @@ const UnifiedIntelligence = ({
       </div>
 
       {/* REASONING NARRATIVE - Why the system thinks this */}
-      <div className="bg-[#0f1420] rounded-xl p-3 border border-slate-700 flex-1">
+      <div className="bg-[#0a0a0a] rounded-xl p-3 border border-slate-700 flex-1">
         <div className="flex items-center gap-2 mb-2">
           <Cpu className="w-4 h-4 text-cyan-400" />
           <span className="text-xs font-bold text-slate-300">SYSTEM REASONING</span>
@@ -1631,7 +1631,7 @@ const PredictiveTradeSetup = ({
       </div>
       
       {/* TRADE LEVELS */}
-      <div className="bg-[#0f1420] rounded-lg p-3 border border-slate-700">
+      <div className="bg-[#0a0a0a] rounded-lg p-3 border border-slate-700">
         <div className="flex items-center gap-2 mb-3">
           <Target className="w-4 h-4 text-cyan-400" />
           <span className="text-xs font-bold text-slate-300">TRADE LEVELS</span>
@@ -1669,7 +1669,7 @@ const PredictiveTradeSetup = ({
       
       {/* SMART MONEY SIGNALS */}
       {tradeSetup.smartMoneySignals.length > 0 && (
-        <div className="bg-[#0f1420] rounded-lg p-3 border border-yellow-500/30">
+        <div className="bg-[#0a0a0a] rounded-lg p-3 border border-yellow-500/30">
           <div className="flex items-center gap-2 mb-2">
             <Zap className="w-4 h-4 text-yellow-400" />
             <span className="text-xs font-bold text-yellow-400">SMART MONEY DETECTED</span>
@@ -1686,7 +1686,7 @@ const PredictiveTradeSetup = ({
       )}
       
       {/* REASONING */}
-      <div className="bg-[#0f1420] rounded-lg p-3 border border-slate-700 flex-1">
+      <div className="bg-[#0a0a0a] rounded-lg p-3 border border-slate-700 flex-1">
         <div className="flex items-center gap-2 mb-2">
           <Brain className="w-4 h-4 text-purple-400" />
           <span className="text-xs font-bold text-slate-300">WHY THIS TRADE</span>
@@ -2857,8 +2857,8 @@ function App() {
   void _handleFeatureHighlight; // For future use
 
   return (
-    <div className="min-h-screen bg-[#0a0e17] text-white">
-      <header className="bg-[#0f1420] border-b border-slate-800 px-6 py-3">
+        <div className="min-h-screen bg-black text-white">
+          <header className="bg-[#0a0a0a] border-b border-slate-800 px-6 py-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
@@ -2918,7 +2918,7 @@ function App() {
       <div className="p-4 grid grid-cols-12 gap-4" style={{ height: 'calc(100vh - 80px)' }}>
         
         <div className="col-span-2 space-y-4">
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+          <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
             <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
               <DollarSign className="w-4 h-4" /> Account
             </h3>
@@ -2937,7 +2937,7 @@ function App() {
             </div>
           </div>
 
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+          <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
             <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
               <BarChart3 className="w-4 h-4" /> Performance
             </h3>
@@ -2973,7 +2973,7 @@ function App() {
             </div>
           </div>
 
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+          <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
             <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
               <Layers className="w-4 h-4" /> Market Structure
             </h3>
@@ -3007,7 +3007,7 @@ function App() {
         </div>
 
         <div className="col-span-7 space-y-4">
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4 relative" style={{ height: '45%' }}>
+          <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4 relative" style={{ height: '45%' }}>
             {/* WOVEN CHART INTELLIGENCE - No-Trade Fog Overlay */}
             <NoTradeFog
               decision={decision}
@@ -3186,7 +3186,7 @@ function App() {
           </div>
 
           <div className="grid grid-cols-2 gap-4" style={{ height: '25%' }}>
-            <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+            <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
               <h3 className="text-sm font-medium text-slate-400 mb-2 flex items-center gap-2">
                 <BarChart3 className="w-4 h-4" /> Bar Delta
               </h3>
@@ -3194,7 +3194,7 @@ function App() {
                 <DeltaChart data={chartData?.delta || []} />
               </div>
             </div>
-            <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+            <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
               <h3 className="text-sm font-medium text-slate-400 mb-2 flex items-center gap-2">
                 <TrendingUp className="w-4 h-4" /> Cumulative Delta
               </h3>
@@ -3204,7 +3204,7 @@ function App() {
             </div>
           </div>
 
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4" style={{ height: '25%' }}>
+          <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4" style={{ height: '25%' }}>
             <h3 className="text-sm font-medium text-slate-400 mb-2 flex items-center gap-2">
               <Clock className="w-4 h-4" /> Recent Trades
             </h3>
@@ -3249,7 +3249,7 @@ function App() {
         </div>
 
                 <div className="col-span-3 space-y-4">
-                  <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-1 flex flex-wrap">
+                  <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-1 flex flex-wrap">
                                         <button
                                           onClick={() => setActiveTab('brain')}
                                           className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
@@ -3364,7 +3364,7 @@ function App() {
 
                                                                         {activeTab === 'orderflow' && (
             <>
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+              <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
                 <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
                   <Gauge className="w-4 h-4" /> Order Flow Imbalance
                 </h3>
@@ -3375,7 +3375,7 @@ function App() {
                 />
               </div>
 
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+              <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
                 <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
                   <Eye className="w-4 h-4" /> Footprint Analysis
                 </h3>
@@ -3395,7 +3395,7 @@ function App() {
                 </div>
               </div>
 
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+              <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
                 <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
                   <Crosshair className="w-4 h-4" /> Liquidity Sweeps
                 </h3>
@@ -3423,7 +3423,7 @@ function App() {
 
                     {activeTab === 'levels' && (
                       <>
-                        <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4" style={{ height: '200px' }}>
+                        <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4" style={{ height: '200px' }}>
                           <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
                             <Volume2 className="w-4 h-4" /> Volume Profile (DeepCharts Style)
                           </h3>
@@ -3436,7 +3436,7 @@ function App() {
                           </div>
                         </div>
 
-                        <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4" style={{ height: '200px' }}>
+                        <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4" style={{ height: '200px' }}>
                           <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
                             <BarChart3 className="w-4 h-4" /> Delta Profile (Buy vs Sell)
                           </h3>
@@ -3448,7 +3448,7 @@ function App() {
                           </div>
                         </div>
 
-                        <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+                        <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
                           <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
                             <Target className="w-4 h-4" /> Key Levels
                           </h3>
@@ -3462,7 +3462,7 @@ function App() {
                     )}
 
                     {activeTab === 'footprint' && (
-                      <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-2" style={{ height: '500px' }}>
+                      <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-2" style={{ height: '500px' }}>
                         <MMTFootprintChart 
                           data={footprintData}
                           symbol={selectedSymbol}
@@ -3472,7 +3472,7 @@ function App() {
 
                     {activeTab === 'risk' && (
                       <>
-                        <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+                        <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
                           <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
                             <AlertTriangle className="w-4 h-4" /> Risk Metrics
                           </h3>
@@ -3486,7 +3486,7 @@ function App() {
                 </div>
               </div>
 
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+              <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
                 <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
                   <Layers className="w-4 h-4" /> Break of Structure
                 </h3>
@@ -3516,7 +3516,7 @@ function App() {
                 )}
               </div>
 
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
+              <div className="bg-[#0a0a0a] rounded-xl border border-slate-800 p-4">
                 <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
                   <Activity className="w-4 h-4" /> Swing Points
                 </h3>
@@ -3544,7 +3544,7 @@ function App() {
         </div>
       </div>
 
-      <footer className="fixed bottom-0 left-0 right-0 bg-[#0f1420] border-t border-slate-800 px-6 py-2">
+      <footer className="fixed bottom-0 left-0 right-0 bg-[#0a0a0a] border-t border-slate-800 px-6 py-2">
         <div className="flex items-center justify-between text-xs text-slate-500">
           <div className="flex items-center gap-4">
             <span>OMEGA-DEVIN v5.0.0-INSTITUTIONAL</span>
