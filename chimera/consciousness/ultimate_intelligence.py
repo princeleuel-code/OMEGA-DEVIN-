@@ -31,6 +31,16 @@ from .fractal_swing_intelligence import FractalSwingIntelligence, FractalSwingAn
 from .manipulation_candle_intelligence import ManipulationCandleIntelligence, ManipulationAnalysis, ManipulationType
 from .multi_profile_volume_intelligence import MultiProfileVolumeIntelligence, MultiProfileAnalysis, ProfileShape
 
+# NEW: 4th YouTube Transcript - Session & Trade Management Intelligence
+from .session_trade_management import (
+    SessionTradeManagementIntelligence, 
+    SessionTradeAnalysis, 
+    TradingSession,
+    SessionQuality,
+    PsychologyState,
+    TradeManagementAction
+)
+
 
 class SignalStrength(Enum):
     """Signal strength levels"""
@@ -212,16 +222,17 @@ class UltimateIntelligence:
     
     # Signal weights for different intelligence sources
     # ALL-KNOWING: Uses BEST parts of ALL systems together
-    # Updated with 3 Trader YouTube Transcript Intelligence
+    # Updated with 4 Trader YouTube Transcript Intelligence
     SIGNAL_WEIGHTS = {
-        "smc": 0.15,  # Smart Money Concepts - Order blocks, FVGs, liquidity
-        "mtf": 0.15,  # Multi-Timeframe - HTF/LTF alignment
-        "vpe": 0.15,  # Volume Profile Edge - POC, VAH, VAL, signal candles
-        "fractal_swing": 0.12,  # NEW: Fractal Swing - 4-6 swing rule, previous range, rounding
-        "manipulation": 0.12,  # NEW: Manipulation Candle - absorption, traps, sweep detection
-        "multi_profile": 0.10,  # NEW: Multi-Profile Volume - week/day/session profiles
-        "regime": 0.08,  # Regime Detection - Market state adaptation
-        "delta": 0.06,  # Delta Print - Orderflow analysis
+        "smc": 0.14,  # Smart Money Concepts - Order blocks, FVGs, liquidity
+        "mtf": 0.14,  # Multi-Timeframe - HTF/LTF alignment
+        "vpe": 0.14,  # Volume Profile Edge - POC, VAH, VAL, signal candles
+        "fractal_swing": 0.11,  # Fractal Swing - 4-6 swing rule, previous range, rounding
+        "manipulation": 0.11,  # Manipulation Candle - absorption, traps, sweep detection
+        "multi_profile": 0.09,  # Multi-Profile Volume - week/day/session profiles
+        "session_mgmt": 0.08,  # NEW: Session & Trade Management - timing, partials, psychology
+        "regime": 0.07,  # Regime Detection - Market state adaptation
+        "delta": 0.05,  # Delta Print - Orderflow analysis
         "consciousness": 0.04,  # Market Consciousness - AI reasoning
         "fundamental": 0.03  # Fundamental - Financials, valuation
     }
@@ -260,6 +271,13 @@ class UltimateIntelligence:
         self.fractal_swing = FractalSwingIntelligence()  # Dave's 4-6 swing rule, previous range
         self.manipulation = ManipulationCandleIntelligence()  # Funded Brothers manipulation candles
         self.multi_profile = MultiProfileVolumeIntelligence()  # Multi-profile volume analysis
+        
+        # NEW: 4th YouTube Transcript - Session & Trade Management Intelligence
+        self.session_mgmt = SessionTradeManagementIntelligence(
+            account_balance=account_balance,
+            risk_per_trade=base_risk_per_trade,
+            max_daily_trades=2
+        )
         
         self.account_balance = account_balance
     
@@ -352,7 +370,21 @@ class UltimateIntelligence:
             else:
                 reasoning.append(f"Multi-Profile: {multi_profile_analysis.signal}")
         
-        # 8. Delta Print Analysis (if provided)
+        # 8. NEW: Session & Trade Management Intelligence (4th YouTube Transcript)
+        session_analysis = None
+        if len(bars) >= 10:
+            session_analysis = self.session_mgmt.analyze(bars)
+            session_signal = self._process_session_signal(session_analysis)
+            signals.append(session_signal)
+            reasoning.append(f"Session: {session_analysis.session_info.current_session.value} ({session_analysis.session_info.session_quality.value}), Psychology: {session_analysis.management_plan.psychology_state.value}")
+            
+            # Add session-based warnings
+            if not session_analysis.management_plan.can_trade:
+                warnings.append(f"Session Management: Trading not recommended - {session_analysis.management_plan.psychology_state.value}")
+            if session_analysis.news_warning:
+                warnings.append("High impact news approaching - avoid new entries")
+        
+        # 9. Delta Print Analysis (if provided)
         if delta_analysis:
             delta_signal = self._process_delta_signal(delta_analysis)
             signals.append(delta_signal)
@@ -764,6 +796,64 @@ class UltimateIntelligence:
             confidence=analysis.confidence,
             reasoning=f"Multi-Profile: {', '.join(reasoning_parts) if reasoning_parts else 'analyzing'}",
             weight=self.SIGNAL_WEIGHTS["multi_profile"]
+        )
+    
+    def _process_session_signal(self, analysis: SessionTradeAnalysis) -> IntelligenceSignal:
+        """
+        Process Session & Trade Management analysis into signal
+        
+        Based on 4th YouTube Transcript concepts:
+        - Session timing awareness (Asia, London, NY, overlap)
+        - Trading psychology detection (revenge trading prevention)
+        - Daily trade limits (max 2 trades per day)
+        - Partial close and break even management
+        """
+        # Determine direction based on session quality and psychology
+        session_quality = analysis.session_info.session_quality
+        psychology_state = analysis.management_plan.psychology_state
+        
+        # Default to neutral
+        direction = "NEUTRAL"
+        strength = 0.5
+        
+        # Boost strength during optimal sessions
+        if session_quality == SessionQuality.EXCELLENT:
+            strength = 0.8
+        elif session_quality == SessionQuality.GOOD:
+            strength = 0.7
+        elif session_quality == SessionQuality.MODERATE:
+            strength = 0.5
+        else:  # POOR
+            strength = 0.3
+        
+        # Reduce strength if psychology is not optimal
+        if psychology_state == PsychologyState.OPTIMAL:
+            strength = min(1.0, strength * 1.1)
+        elif psychology_state == PsychologyState.CAUTIOUS:
+            strength = strength * 0.9
+        elif psychology_state == PsychologyState.REVENGE_RISK:
+            strength = strength * 0.5
+        elif psychology_state == PsychologyState.OVERTRADING:
+            strength = strength * 0.4
+        elif psychology_state == PsychologyState.TILT:
+            strength = strength * 0.2
+        
+        # Confidence based on whether we can trade
+        confidence = 0.8 if analysis.management_plan.can_trade else 0.3
+        
+        reasoning_parts = [
+            f"{analysis.session_info.current_session.value}",
+            f"quality: {session_quality.value}",
+            f"psychology: {psychology_state.value}"
+        ]
+        
+        return IntelligenceSignal(
+            source="session_mgmt",
+            direction=direction,
+            strength=strength,
+            confidence=confidence,
+            reasoning=f"Session: {', '.join(reasoning_parts)}",
+            weight=self.SIGNAL_WEIGHTS["session_mgmt"]
         )
     
     def _calculate_confluence_score(self, signals: List[IntelligenceSignal]) -> float:

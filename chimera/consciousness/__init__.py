@@ -158,6 +158,21 @@ from .multi_profile_volume_intelligence import (
     ZoneType as InstitutionalZoneType,
 )
 
+# NEW: 4th YouTube Transcript - Session & Trade Management Intelligence
+from .session_trade_management import (
+    SessionTradeManagementIntelligence,
+    SessionTradeAnalysis,
+    SessionInfo,
+    TradeManagementPlan,
+    PartialCloseLevel,
+    NewsEvent,
+    TradingSession,
+    SessionQuality,
+    NewsImpact,
+    TradeManagementAction,
+    PsychologyState,
+)
+
 __all__ = [
     # Core consciousness
     "MarketConsciousness",
@@ -323,4 +338,17 @@ __all__ = [
     "ProfileType",
     "ProfileShape",
     "InstitutionalZoneType",
+    
+    # SESSION & TRADE MANAGEMENT INTELLIGENCE (4th YouTube Transcript)
+    "SessionTradeManagementIntelligence",
+    "SessionTradeAnalysis",
+    "SessionInfo",
+    "TradeManagementPlan",
+    "PartialCloseLevel",
+    "NewsEvent",
+    "TradingSession",
+    "SessionQuality",
+    "NewsImpact",
+    "TradeManagementAction",
+    "PsychologyState",
 ]
