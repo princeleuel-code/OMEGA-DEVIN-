@@ -18,6 +18,18 @@ build/
 
 # Local outputs / artifacts
 evolution_output/
+evolution_output_2y/
+evolution_output_real/
+paper_trading_logs/
+
+# Secrets - NEVER COMMIT
+.env
+*.env
+secrets.json
+credentials.json
+
+# Logs (trade history is tracked separately)
+logs/*.log
 
 # OS
 .DS_Store
