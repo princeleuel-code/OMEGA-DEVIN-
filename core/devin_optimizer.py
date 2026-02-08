@@ -1,6 +1,7 @@
 # OMEGA-DEVIN // SELF-OPTIMIZATION KERNEL
 # MISSION: ANALYZE LOSSES AND MUTATE STRATEGY
 # Combined with our 18 Intelligence Modules for TRUE AGI
+# Enhanced with Gemini's "Pain Detection" + Aggression Levels
 
 import json
 import os
@@ -13,26 +14,85 @@ class DevinBrain:
     
     This is the Meta-Loop that allows the bot to:
     1. Analyze its own performance
-    2. Identify losing patterns
+    2. Identify losing patterns (including 3-loss streak detection)
     3. Mutate strategy parameters to improve
     4. Learn from mistakes autonomously
+    5. Adjust aggression levels based on market conditions
+    
+    EVOLUTION TRIGGERS:
+    - Win rate below 60%
+    - Profit factor below 1.5
+    - Max drawdown above 10%
+    - 3 consecutive losses (PAIN DETECTION)
     """
     
     def __init__(self, logs_dir: str = "logs", strategies_dir: str = "strategies"):
         self.logs_dir = logs_dir
         self.strategies_dir = strategies_dir
         self.performance_log = os.path.join(logs_dir, "trade_history.json")
+        self.neural_memory = os.path.join(logs_dir, "neural_memory.json")
         self.strategy_config = os.path.join(strategies_dir, "config.json")
         self.evolution_log = os.path.join(logs_dir, "evolution_history.json")
+        
+        # Ensure neural memory exists
+        self._ensure_memory()
         
         # Performance thresholds
         self.min_win_rate = 0.60  # 60% minimum win rate
         self.min_profit_factor = 1.5  # 1.5 minimum profit factor
         self.max_drawdown = 0.10  # 10% maximum drawdown
+        self.consecutive_loss_trigger = 3  # Mutate after 3 losses
         
         # Mutation parameters
         self.mutation_rate = 0.1  # 10% change per mutation
         self.mutation_history = []
+    
+    def _ensure_memory(self):
+        """Ensure neural memory file exists"""
+        os.makedirs(self.logs_dir, exist_ok=True)
+        if not os.path.exists(self.neural_memory):
+            with open(self.neural_memory, 'w') as f:
+                json.dump([], f)
+    
+    def get_synapses(self) -> Dict:
+        """Get current DNA/Configuration (Gemini compatibility)"""
+        return self.get_current_config()
+    
+    def store_memory(self, trade_result: Dict):
+        """Store trade result in neural memory for learning"""
+        try:
+            with open(self.neural_memory, 'r') as f:
+                history = json.load(f)
+            
+            trade_result['timestamp'] = datetime.now().isoformat()
+            history.append(trade_result)
+            
+            with open(self.neural_memory, 'w') as f:
+                json.dump(history, f, indent=2)
+            
+            print(f"   [DEVIN]: Memory stored. Total experiences: {len(history)}")
+        except Exception as e:
+            print(f"   [DEVIN]: Error storing memory: {e}")
+    
+    def evolve_strategy(self) -> Dict[str, Any]:
+        """
+        THE GOD ALGORITHM - Check if evolution is needed
+        
+        Triggers mutation if:
+        1. Last 3 trades were all losses (PAIN DETECTION)
+        2. Overall performance metrics are below threshold
+        """
+        print("   [DEVIN]: INITIATING INTROSPECTION PROTOCOL...")
+        
+        # First check for consecutive losses (fast trigger)
+        pain_detected = self._detect_pain()
+        if pain_detected:
+            print("   [DEVIN]: PAIN DETECTED. INITIATING ADAPTATION PROTOCOL.")
+            self._mutate_dna_aggressive()
+            return {"status": "pain_mutation", "trigger": "3_consecutive_losses"}
+        
+        # Then do full performance analysis
+        return self.analyze_performance()
         
     def analyze_performance(self) -> Dict[str, Any]:
         """
@@ -194,12 +254,101 @@ class DevinBrain:
         except Exception as e:
             print(f"   [DEVIN]: ERROR MUTATING PARAMETERS: {e}")
     
+    def _detect_pain(self) -> bool:
+        """
+        PAIN DETECTION - Check if last 3 trades were all losses
+        This is the fast trigger for immediate adaptation
+        """
+        try:
+            if not os.path.exists(self.neural_memory):
+                return False
+            
+            with open(self.neural_memory, 'r') as f:
+                history = json.load(f)
+            
+            if len(history) < self.consecutive_loss_trigger:
+                return False
+            
+            # Check last N trades
+            recent_pnl = [t.get('pnl', 0) for t in history[-self.consecutive_loss_trigger:]]
+            
+            # If all recent trades are losses, pain is detected
+            if all(p < 0 for p in recent_pnl):
+                print(f"   [DEVIN]: CONSECUTIVE LOSSES DETECTED: {recent_pnl}")
+                return True
+            
+            return False
+            
+        except Exception as e:
+            print(f"   [DEVIN]: Error in pain detection: {e}")
+            return False
+    
+    def _mutate_dna_aggressive(self):
+        """
+        AGGRESSIVE MUTATION - Called when pain is detected
+        
+        This is more aggressive than normal mutation:
+        1. Lower risk by 20% (defense mode)
+        2. Decrease aggression level (sniper mode)
+        3. Tighten entry requirements
+        """
+        print("   [DEVIN]: INITIATING AGGRESSIVE DNA MUTATION...")
+        
+        try:
+            config = self.get_current_config()
+            original_config = json.loads(json.dumps(config))
+            
+            risk_mgmt = config.get('risk_management', {})
+            strategy = config.get('strategy_settings', {})
+            
+            # 1. DEFENSE MODE - Lower risk by 20%
+            current_risk = risk_mgmt.get('stop_loss_pct', 0.01)
+            new_risk = max(0.005, current_risk * 0.8)
+            risk_mgmt['stop_loss_pct'] = round(new_risk, 4)
+            print(f"   [DEVIN]: DEFENSE MODE - Risk: {current_risk:.4f} -> {new_risk:.4f}")
+            
+            # 2. SNIPER MODE - Decrease aggression level
+            current_aggression = strategy.get('aggression_level', 5)
+            new_aggression = max(1, current_aggression - 1)
+            strategy['aggression_level'] = new_aggression
+            print(f"   [DEVIN]: SNIPER MODE - Aggression: {current_aggression} -> {new_aggression}")
+            
+            # 3. HIGH-PRECISION MODE - If aggression is very low
+            if new_aggression < 3:
+                print("   [DEVIN]: SHIFTING TO HIGH-PRECISION MODE.")
+                strategy['min_confluence'] = min(8, strategy.get('min_confluence', 4) + 1)
+                strategy['min_confidence'] = min(0.85, strategy.get('min_confidence', 0.65) + 0.05)
+            
+            config['risk_management'] = risk_mgmt
+            config['strategy_settings'] = strategy
+            
+            # Save mutated config
+            os.makedirs(os.path.dirname(self.strategy_config), exist_ok=True)
+            with open(self.strategy_config, 'w') as f:
+                json.dump(config, f, indent=4)
+            
+            # Log evolution
+            evolution_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "trigger": "pain_detection",
+                "reason": "3 consecutive losses",
+                "original_config": original_config,
+                "new_config": config
+            }
+            self._log_evolution(evolution_entry)
+            
+            print(f"   [DEVIN]: DNA MUTATION COMPLETE. NEW AGGRESSION LEVEL: {new_aggression}")
+            
+        except Exception as e:
+            print(f"   [DEVIN]: Error in aggressive mutation: {e}")
+    
     def _create_default_config(self) -> Dict:
-        """Create default strategy configuration"""
+        """Create default strategy configuration with aggression levels"""
         return {
             "symbol": "EURUSD",
             "timeframe": "1h",
             "risk_management": {
+                "risk_pct": 0.02,
                 "stop_loss_pct": 0.01,
                 "take_profit_pct": 0.02,
                 "max_drawdown_daily": 0.03,
@@ -207,6 +356,7 @@ class DevinBrain:
                 "max_positions": 3
             },
             "strategy_settings": {
+                "aggression_level": 5,
                 "liquidity_lookback": 20,
                 "volume_threshold": 1000000,
                 "min_confluence": 4,
@@ -223,7 +373,8 @@ class DevinBrain:
                 "session": 0.08,
                 "vwap": 0.05,
                 "absorption": 0.05
-            }
+            },
+            "pairs": ["EURUSD", "GBPUSD", "USDJPY", "XAUUSD"]
         }
     
     def _log_evolution(self, entry: Dict):

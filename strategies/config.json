@@ -2,28 +2,38 @@
     "symbol": "EURUSD",
     "timeframe": "1h",
     "risk_management": {
-        "stop_loss_pct": 0.01,
+        "risk_pct": 0.02,
+        "stop_loss_pct": 0.008,
         "take_profit_pct": 0.02,
         "max_drawdown_daily": 0.03,
         "position_size_pct": 0.02,
         "max_positions": 3
     },
     "strategy_settings": {
+        "aggression_level": 4,
         "liquidity_lookback": 20,
         "volume_threshold": 1000000,
-        "min_confluence": 6,
-        "min_confidence": 0.70
+        "min_confluence": 4,
+        "min_confidence": 0.65
     },
     "intelligence_weights": {
         "price_action": 0.15,
         "order_flow": 0.15,
         "structure": 0.12,
         "delta_flow": 0.12,
-        "volume_profile": 0.10,
-        "institutional": 0.10,
+        "volume_profile": 0.1,
+        "institutional": 0.1,
         "footprint": 0.08,
         "session": 0.08,
         "vwap": 0.05,
         "absorption": 0.05
-    }
+    },
+    "pairs": [
+        "EURUSD",
+        "GBPUSD",
+        "USDJPY",
+        "XAUUSD",
+        "BTC/USDT",
+        "ETH/USDT"
+    ]
 }
