@@ -10,6 +10,9 @@ ccxt>=4.0.0
 # Technical Analysis
 pandas_ta>=0.3.0
 
+# NLP / Sentiment Analysis
+textblob>=0.17.0
+
 # Web Framework (for UI backend)
 fastapi>=0.100.0
 uvicorn>=0.22.0

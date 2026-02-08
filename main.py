@@ -2,6 +2,11 @@
 # OMEGA-DEVIN // MASTER CONTROL PROGRAM
 # Repository: github.com/princeleuel-code/OMEGA-DEVIN-
 # The UNMATCHABLE Trading AGI
+# 
+# THE AGI TRINITY:
+# - LOBE 1: News Sniper (Pre-Cognition / Sentiment)
+# - LOBE 2: Liquidity Engine (Market Physics)
+# - LOBE 3: Devin Brain (Self-Evolution / Neuroplasticity)
 
 import time
 import sys
@@ -15,6 +20,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core.devin_optimizer import DevinBrain
 from core.unified_intelligence import UnifiedIntelligence
 from ingestors.market_data import MarketDataFeed
+from ingestors.news_sniper import NewsSniper
 from strategies.liquidity_hunter import LiquidityHunter
 from strategies.smc_strategy import SMCStrategy
 from strategies.confluence_strategy import ConfluenceStrategy
@@ -57,11 +63,15 @@ class OmegaDevin:
         self.cycle_count = 0
         
         # Initialize components
-        print("\n[OMEGA]: Initializing components...")
+        print("\n[OMEGA]: Initializing THE AGI TRINITY...")
         
-        # The Brain - Self-Optimizing
+        # LOBE 3: The Brain - Self-Optimizing + Neuroplasticity
         self.brain = DevinBrain()
-        print("   [OK] Devin Brain initialized")
+        print("   [OK] LOBE 3: Devin Brain initialized (Self-Evolution)")
+        
+        # LOBE 1: The Ears - News Sentiment / Pre-Cognition
+        self.news_sniper = NewsSniper()
+        print("   [OK] LOBE 1: News Sniper initialized (Pre-Cognition)")
         
         # The Intelligence - 18 Modules Combined
         self.intelligence = UnifiedIntelligence()
@@ -71,11 +81,11 @@ class OmegaDevin:
         self.data_feed = MarketDataFeed(data_source="yfinance")
         print("   [OK] Market Data Feed initialized")
         
-        # The Strategies
+        # LOBE 2: The Strategies - Liquidity Engine
         self.liquidity_hunter = LiquidityHunter()
         self.smc_strategy = SMCStrategy()
         self.confluence_strategy = ConfluenceStrategy(min_confluence=6, min_confidence=0.70)
-        print("   [OK] Strategies initialized (Liquidity Hunter, SMC, Confluence)")
+        print("   [OK] LOBE 2: Liquidity Engine initialized (Turtle Soup + Volume Divergence)")
         
         # The Hands - Execution
         self.executor = TradeExecutor(mode=mode)
@@ -85,7 +95,7 @@ class OmegaDevin:
         self.risk_manager = RiskManager()
         print("   [OK] Risk Manager initialized")
         
-        print("\n[OMEGA]: All systems operational. Ready to trade.")
+        print("\n[OMEGA]: THE AGI TRINITY ONLINE. Ready to trade.")
     
     def run(self, interval: int = 60):
         """
@@ -101,15 +111,28 @@ class OmegaDevin:
         while self.running:
             try:
                 self.cycle_count += 1
-                print(f"\n[OMEGA]: === CYCLE {self.cycle_count} === {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+                print(f"\n[OMEGA]: === HEARTBEAT {self.cycle_count} === {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
                 
-                # 1. Self-Optimization Check
-                print("\n[STEP 1]: Running self-optimization...")
-                optimization_result = self.brain.analyze_performance()
-                print(f"   Status: {optimization_result.get('status', 'unknown')}")
+                # ============================================
+                # THE AGI HEARTBEAT: SENSE -> ADAPT -> OBSERVE -> DECIDE
+                # ============================================
                 
-                # 2. Risk Check
-                print("\n[STEP 2]: Checking risk status...")
+                # 1. SENSE - Feel the market emotion (Pre-Cognition)
+                print("\n[SENSE]: Feeling market emotion...")
+                sentiment = self.news_sniper.get_sentiment("BTC")
+                print(f"   Mood: {sentiment['mood']} (Score: {sentiment['score']:.3f})")
+                print(f"   Direction Bias: {sentiment['direction']}")
+                
+                # 2. ADAPT - Rewrite own DNA based on emotion (Neuroplasticity)
+                print("\n[ADAPT]: Adjusting neuroplasticity...")
+                self.brain.adjust_neuroplasticity(sentiment['score'])
+                
+                # Also check for pain (3 consecutive losses)
+                evolution_result = self.brain.evolve_strategy()
+                print(f"   Evolution Status: {evolution_result.get('status', 'stable')}")
+                
+                # 3. Risk Check before observing
+                print("\n[RISK CHECK]: Verifying trading conditions...")
                 risk_check = self.risk_manager.can_trade()
                 if not risk_check['allowed']:
                     print(f"   BLOCKED: {risk_check['reason']}")
@@ -118,9 +141,9 @@ class OmegaDevin:
                     continue
                 print(f"   OK: {risk_check['reason']}")
                 
-                # 3. Analyze Each Symbol
+                # 4. OBSERVE - Look at the charts with new DNA
                 for symbol in self.symbols:
-                    print(f"\n[STEP 3]: Analyzing {symbol}...")
+                    print(f"\n[OBSERVE]: Scanning {symbol}...")
                     
                     # Fetch market data
                     bars = self.data_feed.fetch_ohlcv(symbol, "1h", 100)
@@ -137,11 +160,16 @@ class OmegaDevin:
                     print(f"   Confidence: {analysis['confidence']:.2%}")
                     print(f"   Confluence: {analysis['confluence']}")
                     
+                    # Check institutional footprint (volume divergence)
+                    institutional_bias = self.liquidity_hunter.get_institutional_bias(bars)
+                    print(f"   Institutional Bias: {institutional_bias['bias']} ({institutional_bias.get('reason', '')})")
+                    
                     # Check for high confluence setup
                     confluence_signal = self.confluence_strategy.analyze(bars, analysis)
                     
+                    # 5. DECIDE - Execute Kill Shot (if conditions align)
                     if confluence_signal['signal'] != 'WAIT':
-                        print(f"\n   *** HIGH CONFLUENCE SIGNAL: {confluence_signal['signal']} ***")
+                        print(f"\n[DECIDE]: *** KILL SHOT DETECTED: {confluence_signal['signal']} ***")
                         print(f"   Reason: {confluence_signal['reason']}")
                         
                         # Calculate position size
@@ -168,6 +196,16 @@ class OmegaDevin:
                                     reason=confluence_signal['reason']
                                 )
                                 print(f"   Order placed: {order['order_id']}")
+                                
+                                # 6. LEARN - Store memory for future evolution
+                                self.brain.store_memory({
+                                    "signal": confluence_signal['signal'],
+                                    "symbol": symbol,
+                                    "entry": current_price,
+                                    "sentiment": sentiment['mood'],
+                                    "confidence": analysis['confidence'],
+                                    "confluence": analysis['confluence']
+                                })
                     else:
                         print(f"   No trade: {confluence_signal['reason']}")
                     

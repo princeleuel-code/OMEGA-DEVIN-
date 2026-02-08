@@ -1,5 +1,6 @@
-# OMEGA-DEVIN // STRATEGY MODULE: LIQUIDITY HUNTER
-# The "Turtle Soup" Strategy - Hunt liquidity sweeps
+# OMEGA-DEVIN // STRATEGY MODULE: LIQUIDITY ENGINE
+# The "Turtle Soup" Strategy - Hunt liquidity sweeps + Volume Divergence
+# Enhanced with Institutional Footprint Detection
 
 from typing import Dict, List, Any, Optional
 from datetime import datetime
@@ -172,6 +173,149 @@ class LiquidityHunter:
             "nearest_above": liquidity_above[0] if liquidity_above else None,
             "nearest_below": liquidity_below[0] if liquidity_below else None
         }
+    
+    def detect_volume_divergence(self, bars: List[Dict]) -> Dict[str, Any]:
+        """
+        VOLUME DIVERGENCE DETECTION - Institutional Footprint
+        
+        Detects when price makes new high/low but volume doesn't confirm:
+        - Price New High + Volume Drop = BEARISH TRAP (institutions selling)
+        - Price New Low + Volume Drop = BULLISH TRAP (institutions buying)
+        
+        This is how smart money hides their activity.
+        """
+        if not bars or len(bars) < 10:
+            return {"divergence": False, "type": None}
+        
+        recent = bars[-10:]
+        
+        # Find highest high and lowest low in recent bars
+        highest_idx = max(range(len(recent)), key=lambda i: recent[i]['high'])
+        lowest_idx = min(range(len(recent)), key=lambda i: recent[i]['low'])
+        
+        # Get average volume
+        avg_volume = sum(b.get('volume', 0) for b in recent) / len(recent)
+        
+        # Check for BEARISH divergence (new high + low volume)
+        if highest_idx >= len(recent) - 3:  # Recent new high
+            high_bar = recent[highest_idx]
+            high_volume = high_bar.get('volume', 0)
+            
+            # Volume should be at least 20% below average for divergence
+            if high_volume < avg_volume * 0.8:
+                return {
+                    "divergence": True,
+                    "type": "BEARISH",
+                    "signal": "SHORT",
+                    "confidence": 0.7,
+                    "reason": f"Price at new high but volume {high_volume:.0f} < avg {avg_volume:.0f}",
+                    "price_level": high_bar['high'],
+                    "volume_ratio": high_volume / avg_volume if avg_volume > 0 else 0
+                }
+        
+        # Check for BULLISH divergence (new low + low volume)
+        if lowest_idx >= len(recent) - 3:  # Recent new low
+            low_bar = recent[lowest_idx]
+            low_volume = low_bar.get('volume', 0)
+            
+            if low_volume < avg_volume * 0.8:
+                return {
+                    "divergence": True,
+                    "type": "BULLISH",
+                    "signal": "LONG",
+                    "confidence": 0.7,
+                    "reason": f"Price at new low but volume {low_volume:.0f} < avg {avg_volume:.0f}",
+                    "price_level": low_bar['low'],
+                    "volume_ratio": low_volume / avg_volume if avg_volume > 0 else 0
+                }
+        
+        return {"divergence": False, "type": None}
+    
+    def analyze_enhanced(self, bars: List[Dict]) -> Dict[str, Any]:
+        """
+        ENHANCED ANALYSIS - Combines Turtle Soup + Volume Divergence
+        
+        This is the full institutional footprint detection:
+        1. Look for liquidity sweep (Turtle Soup)
+        2. Confirm with volume divergence
+        3. Higher confidence when both align
+        """
+        # Get basic liquidity sweep analysis
+        sweep_result = self.analyze(bars)
+        
+        # Get volume divergence
+        divergence = self.detect_volume_divergence(bars)
+        
+        # If we have a sweep signal
+        if sweep_result['signal'] != 'WAIT':
+            # Check if volume divergence confirms
+            if divergence['divergence']:
+                # Both signals align = HIGH CONFIDENCE
+                if (sweep_result['signal'] == 'SHORT' and divergence['type'] == 'BEARISH') or \
+                   (sweep_result['signal'] == 'LONG' and divergence['type'] == 'BULLISH'):
+                    sweep_result['confidence'] = min(0.95, sweep_result['confidence'] + 0.15)
+                    sweep_result['volume_confirmed'] = True
+                    sweep_result['reason'] += f" | VOLUME DIVERGENCE CONFIRMED"
+                else:
+                    # Signals conflict = lower confidence
+                    sweep_result['confidence'] = max(0.4, sweep_result['confidence'] - 0.1)
+                    sweep_result['volume_confirmed'] = False
+                    sweep_result['reason'] += f" | WARNING: Volume divergence conflicts"
+            else:
+                sweep_result['volume_confirmed'] = False
+            
+            return sweep_result
+        
+        # No sweep, but check if volume divergence alone is strong enough
+        if divergence['divergence'] and divergence.get('confidence', 0) >= 0.7:
+            return {
+                "signal": divergence['signal'],
+                "type": "VOLUME_DIVERGENCE",
+                "confidence": divergence['confidence'],
+                "reason": divergence['reason'],
+                "volume_confirmed": True,
+                "timestamp": datetime.now().isoformat()
+            }
+        
+        return sweep_result
+    
+    def get_institutional_bias(self, bars: List[Dict]) -> Dict[str, Any]:
+        """
+        Get overall institutional bias based on multiple factors
+        
+        Returns:
+            Dictionary with bias direction and strength
+        """
+        if not bars or len(bars) < 20:
+            return {"bias": "NEUTRAL", "strength": 0}
+        
+        # Analyze volume trend
+        recent_volume = [b.get('volume', 0) for b in bars[-10:]]
+        older_volume = [b.get('volume', 0) for b in bars[-20:-10]]
+        
+        avg_recent = sum(recent_volume) / len(recent_volume) if recent_volume else 0
+        avg_older = sum(older_volume) / len(older_volume) if older_volume else 0
+        
+        # Analyze price trend
+        recent_close = bars[-1]['close']
+        older_close = bars[-10]['close']
+        price_change = (recent_close - older_close) / older_close if older_close > 0 else 0
+        
+        # Volume increasing + price up = BULLISH accumulation
+        # Volume increasing + price down = BEARISH distribution
+        # Volume decreasing = potential reversal
+        
+        volume_trend = (avg_recent - avg_older) / avg_older if avg_older > 0 else 0
+        
+        if volume_trend > 0.2:  # Volume increasing
+            if price_change > 0:
+                return {"bias": "BULLISH", "strength": min(1.0, volume_trend + abs(price_change)), "reason": "Accumulation"}
+            else:
+                return {"bias": "BEARISH", "strength": min(1.0, volume_trend + abs(price_change)), "reason": "Distribution"}
+        elif volume_trend < -0.2:  # Volume decreasing
+            return {"bias": "REVERSAL_LIKELY", "strength": abs(volume_trend), "reason": "Exhaustion"}
+        else:
+            return {"bias": "NEUTRAL", "strength": 0, "reason": "No clear institutional activity"}
 
 
 # Test the strategy

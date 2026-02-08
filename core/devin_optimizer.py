@@ -409,6 +409,114 @@ class DevinBrain:
             with open(self.evolution_log, 'r') as f:
                 return json.load(f)
         return []
+    
+    def adjust_neuroplasticity(self, sentiment_score: float):
+        """
+        NEUROPLASTICITY - The Brain rewrites Config based on Market Sentiment
+        
+        This is the AGI adaptation layer that responds to market emotion:
+        - FEAR (score < -0.5): Deploy shields, SHORT only, tight risk
+        - GREED (score > 0.5): Hunter mode, LONG only, loose risk
+        - NEUTRAL: Omni-directional trading allowed
+        
+        Args:
+            sentiment_score: float from -1.0 (extreme fear) to +1.0 (extreme greed)
+        """
+        print(f"   [AGI]: NEUROPLASTICITY ENGAGED. SENTIMENT: {sentiment_score:.3f}")
+        
+        try:
+            config = self.get_current_config()
+            original_config = json.loads(json.dumps(config))
+            
+            risk_mgmt = config.get('risk_management', {})
+            strategy = config.get('strategy_settings', {})
+            
+            # FEAR DETECTED - Deploy defensive shields
+            if sentiment_score < -0.5:
+                print("   [AGI]: FEAR DETECTED IN MARKET. DEPLOYING SHIELDS.")
+                risk_mgmt['max_drawdown_daily'] = 0.01  # Tighten leash to 1%
+                strategy['direction'] = "SHORT"
+                strategy['aggression_level'] = max(1, strategy.get('aggression_level', 5) - 2)
+                
+            # GREED DETECTED - Activate hunter mode
+            elif sentiment_score > 0.5:
+                print("   [AGI]: GREED DETECTED. ACTIVATING HUNTER MODE.")
+                risk_mgmt['max_drawdown_daily'] = 0.05  # Loosen leash to 5%
+                strategy['direction'] = "LONG"
+                strategy['aggression_level'] = min(10, strategy.get('aggression_level', 5) + 1)
+                
+            # NEUTRAL - Omni-directional
+            else:
+                print("   [AGI]: NEUTRAL SENTIMENT. OMNI-DIRECTIONAL MODE.")
+                risk_mgmt['max_drawdown_daily'] = 0.03  # Standard 3%
+                strategy['direction'] = "OMNI"
+            
+            config['risk_management'] = risk_mgmt
+            config['strategy_settings'] = strategy
+            
+            # Save adapted config
+            os.makedirs(os.path.dirname(self.strategy_config), exist_ok=True)
+            with open(self.strategy_config, 'w') as f:
+                json.dump(config, f, indent=4)
+            
+            # Log the neuroplasticity event
+            evolution_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "trigger": "neuroplasticity",
+                "sentiment_score": sentiment_score,
+                "direction": strategy.get('direction', 'OMNI'),
+                "original_config": original_config,
+                "new_config": config
+            }
+            self._log_evolution(evolution_entry)
+            
+            print(f"   [AGI]: ADAPTATION COMPLETE. DIRECTION: {strategy.get('direction', 'OMNI')}")
+            
+        except Exception as e:
+            print(f"   [AGI]: Error in neuroplasticity: {e}")
+    
+    def pleasure_response(self, metrics: Dict):
+        """
+        PLEASURE RESPONSE - Called when performance is excellent
+        
+        If Win Rate > 70% over last 10 trades:
+        - Increase position size by 10% (compound gains)
+        - Loosen take profit targets
+        - Increase aggression level
+        """
+        print("   [AGI]: PLEASURE DETECTED. COMPOUNDING GAINS.")
+        
+        try:
+            config = self.get_current_config()
+            risk_mgmt = config.get('risk_management', {})
+            strategy = config.get('strategy_settings', {})
+            
+            # Increase position size by 10%
+            current_size = risk_mgmt.get('position_size_pct', 0.02)
+            new_size = min(0.05, current_size * 1.1)  # Cap at 5%
+            risk_mgmt['position_size_pct'] = round(new_size, 4)
+            
+            # Loosen take profit
+            current_tp = risk_mgmt.get('take_profit_pct', 0.02)
+            new_tp = min(0.06, current_tp * 1.1)
+            risk_mgmt['take_profit_pct'] = round(new_tp, 4)
+            
+            # Increase aggression
+            current_aggression = strategy.get('aggression_level', 5)
+            new_aggression = min(10, current_aggression + 1)
+            strategy['aggression_level'] = new_aggression
+            
+            config['risk_management'] = risk_mgmt
+            config['strategy_settings'] = strategy
+            
+            with open(self.strategy_config, 'w') as f:
+                json.dump(config, f, indent=4)
+            
+            print(f"   [AGI]: POSITION SIZE: {current_size:.4f} -> {new_size:.4f}")
+            print(f"   [AGI]: AGGRESSION: {current_aggression} -> {new_aggression}")
+            
+        except Exception as e:
+            print(f"   [AGI]: Error in pleasure response: {e}")
 
 
 # Test the brain
