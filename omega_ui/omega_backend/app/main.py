@@ -65,6 +65,87 @@ class TradingState:
 
 state = TradingState()
 
+# ============================================================================
+# LIVE SIMULATION (LOCAL DEV)
+# ============================================================================
+#
+# This provides a simple "live" price feed for the dashboard without requiring
+# external market data. It is intentionally synthetic and MUST NOT be treated
+# as REAL data for trading permission/confidence. The provenance firewall still
+# enforces fail-closed behavior for decisions.
+
+_sim_tasks: Dict[str, asyncio.Task] = {}
+_sim_status: Dict[str, Dict[str, Any]] = {}
+
+
+def _volatility_for_symbol(symbol: str) -> float:
+    """Rough per-step volatility used by the local simulation."""
+    s = symbol.upper()
+    if s.endswith("USDT"):
+        # crypto
+        return 80.0 if s.startswith("BTC") else 6.0
+    if s == "XAUUSD":
+        return 1.5
+    if s.endswith("JPY"):
+        return 0.08
+    # FX majors
+    return 0.0012
+
+
+def _default_start_price(symbol: str) -> float:
+    s = symbol.upper()
+    return {
+        "EURUSD": 1.0850,
+        "GBPUSD": 1.2650,
+        "USDJPY": 154.50,
+        "AUDUSD": 0.6280,
+        "XAUUSD": 2045.00,
+        "BTCUSDT": 45000.0,
+        "ETHUSDT": 2500.0,
+    }.get(s, 1.0)
+
+
+def _next_bar(symbol: str, last_close: float) -> dict:
+    """Generate the next synthetic OHLCV bar from the prior close."""
+    vol = _volatility_for_symbol(symbol)
+    open_p = float(last_close)
+    close_p = max(0.0001, open_p + float(np.random.normal(0.0, vol)))
+    wick = abs(float(np.random.normal(0.0, vol / 2)))
+    high_p = max(open_p, close_p) + wick
+    low_p = max(0.0001, min(open_p, close_p) - wick)
+    volume = int(np.random.randint(500, 5000)) if not symbol.upper().endswith("USDT") else int(np.random.randint(50, 500))
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "open": open_p,
+        "high": float(high_p),
+        "low": float(low_p),
+        "close": float(close_p),
+        "volume": volume,
+    }
+
+
+async def _simulation_loop(symbol: str, interval_s: float, max_history: int = 2000) -> None:
+    """Continuously append new bars and update the in-memory dashboard state."""
+    sym = symbol.upper()
+    while True:
+        await asyncio.sleep(interval_s)
+        history = state.price_history.setdefault(sym, [])
+        if history:
+            last_close = float(history[-1].get("close", _default_start_price(sym)))
+        else:
+            last_close = _default_start_price(sym)
+        bar = _next_bar(sym, last_close)
+        history.append(bar)
+        if len(history) > max_history:
+            del history[:-max_history]
+        state.current_prices[sym] = float(bar["close"])
+        _sim_status[sym] = {
+            "running": True,
+            "interval_ms": int(interval_s * 1000),
+            "last_step_ts": bar["timestamp"],
+            "bars": len(history),
+        }
+
 def calculate_volume_profile(bars: List[dict], num_levels: int = 50) -> dict:
     """Calculate Volume Profile with HVN, LVN, POC, and Value Area"""
     if not bars or len(bars) < 10:
@@ -980,13 +1061,17 @@ async def load_sample_data():
             "USDJPY": 154.50,
             "AUDUSD": 0.6280,
             "XAUUSD": 2045.00,
+            "BTCUSDT": 45000.0,
+            "ETHUSDT": 2500.0,
         }
         symbols_files = {
             "EURUSD": "/home/ubuntu/omega_devin/data/eurusd_hourly_2y.csv",
             "GBPUSD": "/home/ubuntu/omega_devin/data/gbpusd_hourly_2y.csv",
             "USDJPY": "/home/ubuntu/omega_devin/data/usdjpy_hourly_2y.csv",
             "AUDUSD": "/home/ubuntu/omega_devin/data/audusd_hourly_2y.csv",
-            "XAUUSD": "/home/ubuntu/omega_devin/data/xauusd_hourly_2y.csv"
+            "XAUUSD": "/home/ubuntu/omega_devin/data/xauusd_hourly_2y.csv",
+            "BTCUSDT": "/home/ubuntu/omega_devin/data/btcusdt_hourly_2y.csv",
+            "ETHUSDT": "/home/ubuntu/omega_devin/data/ethusdt_hourly_2y.csv",
         }
         
         for symbol, data_file in symbols_files.items():
@@ -1041,6 +1126,15 @@ async def load_sample_data():
         print(f"Error loading sample data: {e}")
         import traceback
         traceback.print_exc()
+
+
+@app.on_event("shutdown")
+async def _shutdown_cancel_simulations():
+    """Best-effort cancellation so background sim tasks don't leak across restarts."""
+    for sym, task in list(_sim_tasks.items()):
+        if task and not task.done():
+            task.cancel()
+    _sim_tasks.clear()
 
 # ============================================================================
 # DEEPCHARTS-STYLE ADVANCED ORDER FLOW ANALYSIS
@@ -2186,3 +2280,49 @@ def get_decision(symbol: str):
             for k, v in packet_data.get("features", {}).items()
         }
     }
+
+
+@app.post("/api/sim/start/{symbol}")
+async def start_simulation(symbol: str, interval_ms: int = 1000):
+    """
+    Start local synthetic "live" simulation for the dashboard.
+    This only mutates in-memory chart data; it does NOT enable real trading.
+    """
+    sym = symbol.upper()
+    interval_ms = max(100, int(interval_ms))
+    existing = _sim_tasks.get(sym)
+    if existing and not existing.done():
+        return {"success": True, "symbol": sym, "status": _sim_status.get(sym, {"running": True})}
+
+    task = asyncio.create_task(_simulation_loop(sym, interval_ms / 1000.0))
+    _sim_tasks[sym] = task
+    _sim_status[sym] = {"running": True, "interval_ms": interval_ms, "last_step_ts": None, "bars": len(state.price_history.get(sym, []))}
+    return {"success": True, "symbol": sym, "status": _sim_status[sym]}
+
+
+@app.post("/api/sim/stop/{symbol}")
+async def stop_simulation(symbol: str):
+    """Stop local synthetic simulation for a symbol."""
+    sym = symbol.upper()
+    task = _sim_tasks.get(sym)
+    if task and not task.done():
+        task.cancel()
+    _sim_tasks.pop(sym, None)
+    st = _sim_status.get(sym, {})
+    st["running"] = False
+    _sim_status[sym] = st
+    return {"success": True, "symbol": sym, "status": _sim_status.get(sym, {"running": False})}
+
+
+@app.get("/api/sim/status")
+def get_simulation_status():
+    """Get current simulation status for all symbols."""
+    # Remove finished tasks
+    for sym, task in list(_sim_tasks.items()):
+        if task.done():
+            _sim_tasks.pop(sym, None)
+            st = _sim_status.get(sym, {})
+            st["running"] = False
+            st["error"] = str(task.exception()) if task.exception() else None
+            _sim_status[sym] = st
+    return {"running": sorted(_sim_tasks.keys()), "status": _sim_status}
