@@ -605,6 +605,209 @@ def calculate_market_structure(bars: List[dict]) -> dict:
         "choch_signals": choch_signals
     }
 
+
+# ============================================================================
+# GOD-EYE OVERLAY (NARRATIVE + ANCHORS)
+# ============================================================================
+
+def _bar_ts(bar: dict) -> str:
+    return str(bar.get("timestamp") or bar.get("time") or "")
+
+
+def _abs_index(total_bars: int, slice_len: int, idx_in_slice: int) -> int:
+    # Map slice-relative indices (0..slice_len-1) to absolute bar indices.
+    return max(0, (total_bars - slice_len) + int(idx_in_slice))
+
+
+def build_god_eye_overlay(
+    *,
+    symbol: str,
+    all_bars: List[dict],
+    recent_bars: List[dict],
+    volume_profile: dict,
+    vwap_data: List[dict],
+    delta_data: List[dict],
+    liquidity_sweeps: List[dict],
+    market_structure: dict,
+    has_real_dom_snapshot: bool,
+    weave_decision: str,
+    weave_confidence: float,
+) -> dict:
+    """
+    Build a plain-English narrative + clickable anchors for the UI.
+
+    IMPORTANT:
+    - This is display-only. It MUST NOT loosen the fail-closed trade logic.
+    - If data is Tier C only, it must not output actionable entry/SL/TP triggers.
+    """
+    total_n = len(all_bars)
+    slice_n = len(recent_bars)
+
+    current_price = float(recent_bars[-1]["close"]) if recent_bars else 0.0
+
+    tier = "REAL" if has_real_dom_snapshot else "SYNTHETIC"
+    can_trade = bool(weave_decision == "TRADE" and has_real_dom_snapshot)
+
+    anchors: List[RenderAnchor] = []
+    chain: List[str] = []
+
+    # Structure + trend
+    structure = str(market_structure.get("structure") or "UNKNOWN")
+    trend = str(market_structure.get("trend") or "NEUTRAL")
+    chain.append(f"Structure: {structure} ({trend}).")
+
+    # Swings (for clickable highlights)
+    for sh in market_structure.get("swing_highs", []) or []:
+        idx = sh.get("index")
+        price = sh.get("price")
+        if idx is None or price is None:
+            continue
+        anchors.append(
+            RenderAnchor(
+                anchor_type="level",
+                bar_index=_abs_index(total_n, slice_n, int(idx)),
+                price_low=float(price),
+                price_high=float(price),
+                description=f"Swing High @ {float(price):.5f}",
+            )
+        )
+    for sl in market_structure.get("swing_lows", []) or []:
+        idx = sl.get("index")
+        price = sl.get("price")
+        if idx is None or price is None:
+            continue
+        anchors.append(
+            RenderAnchor(
+                anchor_type="level",
+                bar_index=_abs_index(total_n, slice_n, int(idx)),
+                price_low=float(price),
+                price_high=float(price),
+                description=f"Swing Low @ {float(price):.5f}",
+            )
+        )
+
+    # BOS signals
+    for bos in market_structure.get("bos_signals", []) or []:
+        lvl = bos.get("broken_level")
+        typ = bos.get("type")
+        if lvl is None:
+            continue
+        anchors.append(
+            RenderAnchor(
+                anchor_type="level",
+                bar_index=max(0, total_n - 1),
+                price_low=float(lvl),
+                price_high=float(lvl),
+                description=f"{typ or 'BOS'} @ {float(lvl):.5f}",
+            )
+        )
+        chain.append(f"{typ or 'BOS'}: broke {float(lvl):.5f}.")
+
+    # Liquidity sweeps (recent)
+    if liquidity_sweeps:
+        last_sweep = liquidity_sweeps[-1]
+        s_price = last_sweep.get("sweep_price")
+        s_sig = last_sweep.get("signal") or "NEUTRAL"
+        s_ts = str(last_sweep.get("timestamp") or "")
+        if s_price is not None:
+            chain.append(f"Liquidity sweep: {s_sig} @ {float(s_price):.5f}.")
+        if s_ts:
+            idx_in_slice = next((i for i, b in enumerate(recent_bars) if _bar_ts(b) == s_ts), None)
+            if idx_in_slice is not None and s_price is not None:
+                anchors.append(
+                    RenderAnchor(
+                        anchor_type="candle",
+                        bar_index=_abs_index(total_n, slice_n, idx_in_slice),
+                        price_low=float(s_price),
+                        price_high=float(s_price),
+                        description=f"Liquidity sweep ({s_sig}) @ {float(s_price):.5f}",
+                    )
+                )
+
+    # Volume profile position (Tier C estimate)
+    if volume_profile and "vah" in volume_profile and "val" in volume_profile and "poc" in volume_profile:
+        vah = float(volume_profile["vah"])
+        val = float(volume_profile["val"])
+        poc = float(volume_profile["poc"])
+        if current_price > vah:
+            chain.append(f"Value Area: above VAH ({vah:.5f}) (breakout territory).")
+        elif current_price < val:
+            chain.append(f"Value Area: below VAL ({val:.5f}) (breakdown territory).")
+        else:
+            side = "above" if current_price >= poc else "below"
+            chain.append(f"Value Area: inside ({val:.5f}-{vah:.5f}); price {side} POC ({poc:.5f}).")
+        anchors.append(
+            RenderAnchor(
+                anchor_type="zone",
+                bar_index=max(0, total_n - 1),
+                price_low=val,
+                price_high=vah,
+                description="Value Area (estimated from OHLCV; Tier C context only)",
+            )
+        )
+
+    # VWAP position (Tier C estimate)
+    if vwap_data:
+        last_vwap = vwap_data[-1]
+        vwap = float(last_vwap.get("vwap") or 0.0)
+        if vwap > 0:
+            pos = "above" if current_price >= vwap else "below"
+            chain.append(f"VWAP: price {pos} VWAP ({vwap:.5f}).")
+            anchors.append(
+                RenderAnchor(
+                    anchor_type="level",
+                    bar_index=max(0, total_n - 1),
+                    price_low=vwap,
+                    price_high=vwap,
+                    description=f"VWAP (estimated): {vwap:.5f}",
+                )
+            )
+
+    # Delta trend (Tier C estimate)
+    if delta_data:
+        last_cvd = float(delta_data[-1].get("cumulative_delta") or 0.0)
+        prev_cvd = float(delta_data[max(0, len(delta_data) - 10)].get("cumulative_delta") or 0.0)
+        dv = last_cvd - prev_cvd
+        trend = "rising" if dv > 0 else "falling" if dv < 0 else "flat"
+        chain.append(f"Delta: cumulative delta {trend} ({last_cvd:.0f}).")
+
+    # Provenance / decision guardrails
+    if not has_real_dom_snapshot:
+        chain.append("Provenance: Tier C only (no qualified real DOM snapshot).")
+    if weave_decision != "TRADE":
+        chain.append(f"Decision: {weave_decision} (conf {weave_confidence:.0f}%).")
+
+    # Narrative: coherent paragraph, explicitly non-actionable under Tier C.
+    parts = []
+    parts.append(f"{symbol}: {structure} / {trend}.")
+    if liquidity_sweeps and liquidity_sweeps[-1].get("sweep_price") is not None:
+        s = liquidity_sweeps[-1]
+        parts.append(
+            f"Recent liquidity sweep {s.get('signal','NEUTRAL').lower()} near {float(s.get('sweep_price')):.5f}."
+        )
+    if volume_profile and "poc" in volume_profile:
+        parts.append(f"POC {float(volume_profile['poc']):.5f}.")
+    if not has_real_dom_snapshot:
+        parts.append("All structure/orderflow here is estimated from OHLCV (Tier C) and cannot authorize execution.")
+    if weave_decision != "TRADE":
+        parts.append(f"System is fail-closed: {weave_decision}.")
+
+    narrative = " ".join(parts).strip()
+
+    return {
+        "symbol": symbol,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "provenance_tier": "A" if tier == "REAL" else "C",
+        "can_trade": can_trade,
+        "market_state": {
+            "structure": structure,
+            "trend": trend,
+        },
+        "narrative": narrative,
+        "reasoning_chain": chain,
+        "anchors": [a.to_dict() for a in anchors],
+    }
+
 def calculate_session_profiles(bars: List[dict]) -> dict:
     """
     Calculate Session-based Volume Profiles (Asian, London, NY sessions)
@@ -1945,7 +2148,29 @@ def get_weave_packet(symbol: str):
     # Check for existing packet
     existing_packet = packet_store.get_by_bar(symbol, bar_index)
     if existing_packet:
-        return {"packet": existing_packet.to_dict()}
+        recent_bars = bars[-50:]
+        vp = calculate_volume_profile(recent_bars)
+        vwap_data = calculate_vwap(recent_bars)
+        delta_data = calculate_cumulative_delta(recent_bars)
+        liq_sweeps = detect_liquidity_sweeps(recent_bars)
+        ms = calculate_market_structure(recent_bars)
+        dom_snapshot = market_data_registry.get_snapshot(symbol)
+        god_eye = build_god_eye_overlay(
+            symbol=symbol,
+            all_bars=bars,
+            recent_bars=recent_bars,
+            volume_profile=vp,
+            vwap_data=vwap_data,
+            delta_data=delta_data,
+            liquidity_sweeps=liq_sweeps,
+            market_structure=ms,
+            has_real_dom_snapshot=bool(dom_snapshot and getattr(dom_snapshot, "is_real", False)),
+            weave_decision=existing_packet.decision.value,
+            weave_confidence=float(existing_packet.confidence or 0.0),
+        )
+        payload = existing_packet.to_dict()
+        payload["god_eye"] = god_eye
+        return {"packet": payload}
     
     # Generate new packet with current analysis
     recent_bars = bars[-50:]
@@ -2144,7 +2369,32 @@ def get_weave_packet(symbol: str):
     # Store packet
     packet_store.store(packet)
     
-    return {"packet": packet.to_dict()}
+    god_eye = build_god_eye_overlay(
+        symbol=symbol,
+        all_bars=bars,
+        recent_bars=recent_bars,
+        volume_profile=vp,
+        vwap_data=calculate_vwap(recent_bars),
+        delta_data=delta_data,
+        liquidity_sweeps=detect_liquidity_sweeps(recent_bars),
+        market_structure=calculate_market_structure(recent_bars),
+        has_real_dom_snapshot=bool(dom_snapshot and getattr(dom_snapshot, "is_real", False)),
+        weave_decision=packet.decision.value,
+        weave_confidence=float(packet.confidence or 0.0),
+    )
+    payload = packet.to_dict()
+    payload["god_eye"] = god_eye
+    return {"packet": payload}
+
+
+@app.get("/api/god-eye/{symbol}")
+def get_god_eye_overlay(symbol: str):
+    """Get the current God-Eye overlay (narrative + anchors)."""
+    resp = get_weave_packet(symbol)
+    pkt = resp.get("packet") if isinstance(resp, dict) else None
+    if not isinstance(pkt, dict):
+        return {"error": "No packet available", "god_eye": None}
+    return {"god_eye": pkt.get("god_eye")}
 
 
 @app.get("/api/replay/{symbol}")

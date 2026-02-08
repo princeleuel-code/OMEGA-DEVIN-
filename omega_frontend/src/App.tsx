@@ -102,6 +102,17 @@ interface ResolutionCondition {
   anchors: UnknownRecord[];
 }
 
+interface GodEyeOverlay {
+  symbol: string;
+  timestamp: string;
+  provenance_tier: string;
+  can_trade: boolean;
+  market_state: { structure: string; trend: string };
+  narrative: string;
+  reasoning_chain: string[];
+  anchors: UnknownRecord[];
+}
+
 interface WeavePacket {
   packet_id: string;
   timestamp: string;
@@ -116,6 +127,7 @@ interface WeavePacket {
   conflict_map: UnknownRecord[];
   resolution_conditions: ResolutionCondition[];
   features: Record<string, UnknownRecord>;
+  god_eye?: GodEyeOverlay;
 }
 
 interface DomProviderHealth {
@@ -2467,8 +2479,18 @@ function App() {
                         </div>
                       </div>
                       <div className="mt-1 text-[11px] text-slate-300">
-                        {weavePacket.reason_text}
+                        {weavePacket.god_eye?.narrative ?? weavePacket.reason_text}
                       </div>
+
+                      {(weavePacket.god_eye?.reasoning_chain || []).length > 0 && (
+                        <div className="mt-2 text-[11px] text-slate-200/90">
+                          {(weavePacket.god_eye?.reasoning_chain || []).slice(0, 4).map((line, idx) => (
+                            <div key={idx} className="font-mono text-slate-300">
+                              {line}
+                            </div>
+                          ))}
+                        </div>
+                      )}
 
                       <div className="mt-2 flex flex-wrap gap-2">
                         {(weavePacket.evidence_pins || []).map((pin) => {
