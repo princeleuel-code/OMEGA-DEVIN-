@@ -1,0 +1,6 @@
+tvscreener:
+  enabled: true
+  ttl_seconds: 60
+  max_requests_per_min: 30
+  timeout_seconds: 10
+

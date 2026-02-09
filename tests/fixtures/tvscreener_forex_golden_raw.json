@@ -1,0 +1,33 @@
+{
+  "labels": {
+    "change_pct": "Change %",
+    "exchange": "Exchange",
+    "market_cap": "Market Capitalization",
+    "price": "Price",
+    "rsi": "Rsi10",
+    "symbol": "Symbol",
+    "volatility": "Volatility",
+    "volume": "Volume"
+  },
+  "raw_rows": [
+    {
+      "Change %": -0.291575,
+      "Exchange": "FX_IDC",
+      "Price": 0.38642,
+      "Rsi10": 45.2,
+      "Symbol": "FX_IDC:AEDAUD",
+      "Volatility": 0.55,
+      "Volume": 0
+    },
+    {
+      "Change %": 0.4242,
+      "Exchange": "FX_IDC",
+      "Price": 1.4247,
+      "Rsi10": 61.0,
+      "Symbol": "FX_IDC:AEDBRX",
+      "Volatility": 0.62,
+      "Volume": 0
+    }
+  ]
+}
+
