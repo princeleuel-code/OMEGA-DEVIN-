@@ -19,6 +19,9 @@ build/
 # Local outputs / artifacts
 evolution_output/
 data/scans/
+runs/*
+!runs/sample_data/
+!runs/sample_data/**
 
 # OS
 .DS_Store
