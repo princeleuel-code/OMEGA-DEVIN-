@@ -569,10 +569,11 @@ def scan(  # noqa: PLR0913 - adapter signature is intentionally explicit
                 ts_iso=ts_iso,
                 stale=False,
             )
+            fetched_ts = _now_ts()
             with _CACHE_LOCK:
                 _CACHE[cache_key] = _CacheEntry(
-                    fetched_ts=now,
-                    expires_ts=now + float(cfg.ttl_seconds),
+                    fetched_ts=fetched_ts,
+                    expires_ts=fetched_ts + float(cfg.ttl_seconds),
                     rows=rows,
                 )
             return rows
@@ -605,4 +606,3 @@ def healthcheck(*, config_path: Optional[str | Path] = None) -> bool:
         return True
     except Exception:
         return False
-

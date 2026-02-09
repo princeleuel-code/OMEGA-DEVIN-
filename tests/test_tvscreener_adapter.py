@@ -7,6 +7,13 @@ from chimera.core.scanners import tvscreener_adapter
 
 
 class TestTVScreenerAdapter(unittest.TestCase):
+    def setUp(self):
+        # Ensure tests are isolated from module-level caches / rate-limiter state.
+        with tvscreener_adapter._CACHE_LOCK:  # pylint: disable=protected-access
+            tvscreener_adapter._CACHE.clear()  # pylint: disable=protected-access
+        with tvscreener_adapter._REQUEST_TIMES_LOCK:  # pylint: disable=protected-access
+            tvscreener_adapter._REQUEST_TIMES.clear()  # pylint: disable=protected-access
+
     def _load_fixture(self) -> dict:
         path = Path(__file__).parent / "fixtures" / "tvscreener_forex_golden_raw.json"
         return json.loads(path.read_text(encoding="utf-8"))
@@ -115,4 +122,3 @@ class TestTVScreenerAdapter(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-
