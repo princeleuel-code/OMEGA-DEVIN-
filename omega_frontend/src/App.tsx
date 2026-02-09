@@ -96,6 +96,16 @@ interface EvidencePin {
   zone?: { price_low: number; price_high: number } | null;
 }
 
+interface ConflictMapEntry {
+  signal_a: string;
+  signal_b: string;
+  weight_a: number;
+  weight_b: number;
+  resolution: string;
+  bar_indices: number[];
+  [k: string]: unknown;
+}
+
 interface ResolutionCondition {
   condition: string;
   type: string;
@@ -124,7 +134,7 @@ interface WeavePacket {
   reason_codes: string[];
   reason_text: string;
   evidence_pins: EvidencePin[];
-  conflict_map: UnknownRecord[];
+  conflict_map: ConflictMapEntry[];
   resolution_conditions: ResolutionCondition[];
   features: Record<string, UnknownRecord>;
   god_eye?: GodEyeOverlay;
@@ -1291,6 +1301,75 @@ const UnifiedIntelligence = ({
     return 'from-slate-500 to-slate-600';
   };
 
+  const downloadJson = (filename: string, data: unknown) => {
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  const conflictMapToIsoflowInitialData = (conflicts: ConflictMapEntry[]) => {
+    const safeId = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 100) || 'unknown';
+    const uniqueSignals = Array.from(
+      new Set(
+        conflicts
+          .flatMap((c) => [String(c?.signal_a ?? ''), String(c?.signal_b ?? '')])
+          .filter((s) => s.trim().length > 0)
+      )
+    ).sort();
+
+    const items = uniqueSignals.map((name) => ({ id: safeId(name), name }));
+
+    // Deterministic grid layout (4 columns) so files diff nicely in git.
+    const viewItems = items.map((it, idx) => ({
+      id: it.id,
+      tile: { x: idx % 4, y: Math.floor(idx / 4) },
+    }));
+
+    const connectors = conflicts.map((c, idx) => {
+      const a = safeId(String(c?.signal_a ?? 'A'));
+      const b = safeId(String(c?.signal_b ?? 'B'));
+      const wA = Number(c?.weight_a ?? 0);
+      const wB = Number(c?.weight_b ?? 0);
+      const res = String(c?.resolution ?? 'unknown');
+      const style = res === 'cancelled_out' ? 'DOTTED' : 'SOLID';
+      return {
+        id: `c_${idx}`,
+        description: `${res} (wA=${wA.toFixed(2)}, wB=${wB.toFixed(2)})`,
+        width: 6,
+        style,
+        anchors: [
+          { id: `a_${idx}_0`, ref: { item: a } },
+          { id: `a_${idx}_1`, ref: { item: b } },
+        ],
+      };
+    });
+
+    return {
+      title: 'OMEGA Conflict Map',
+      version: '1',
+      icons: [],
+      colors: [{ id: '__DEFAULT__', value: '#0392ff' }],
+      items,
+      views: [
+        {
+          id: 'view_conflict_map',
+          name: 'Conflict Map',
+          items: viewItems,
+          connectors,
+          rectangles: [],
+          textBoxes: [],
+        },
+      ],
+      fitToView: true,
+    };
+  };
+
   return (
     <div className="h-full flex flex-col space-y-3 overflow-auto">
       {/* UNIFIED BRAIN - The Central Intelligence */}
@@ -1375,6 +1454,69 @@ const UnifiedIntelligence = ({
           ))}
         </div>
       </div>
+
+      {/* CONFLICT MAP - WOVEN packet signal conflicts (advisory only) */}
+      {(weavePacket?.conflict_map || []).length > 0 && (
+        <div className="bg-[#0f1420] rounded-xl p-3 border border-slate-700">
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400" />
+              <span className="text-xs font-bold text-slate-300">CONFLICT MAP</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const ts = new Date().toISOString().replace(/[:.]/g, '-');
+                downloadJson(
+                  `isoflow_conflict_map_${ts}.json`,
+                  conflictMapToIsoflowInitialData(weavePacket?.conflict_map || [])
+                );
+              }}
+              className="text-[11px] px-2 py-1 rounded-md border border-slate-600 text-slate-200 hover:bg-slate-800/60"
+              title="Export a network diagram JSON compatible with Isoflow (MIT)."
+            >
+              Export Isoflow JSON
+            </button>
+          </div>
+
+          <div className="space-y-2">
+            {(weavePacket?.conflict_map || []).slice(0, 6).map((c, idx) => {
+              const a = String(c?.signal_a ?? 'A');
+              const b = String(c?.signal_b ?? 'B');
+              const wA = Number(c?.weight_a ?? 0);
+              const wB = Number(c?.weight_b ?? 0);
+              const res = String(c?.resolution ?? 'unknown');
+              const bars = Array.isArray(c?.bar_indices) ? c.bar_indices : [];
+              const badge =
+                res === 'a_wins' ? 'bg-emerald-500/15 text-emerald-200 border-emerald-500/30' :
+                res === 'b_wins' ? 'bg-red-500/15 text-red-200 border-red-500/30' :
+                'bg-slate-500/15 text-slate-200 border-slate-500/30';
+
+              return (
+                <div key={idx} className="p-2 rounded-lg border border-slate-700/70 bg-slate-900/40">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="text-xs text-slate-200 font-mono">
+                      {a} <span className="text-slate-500">vs</span> {b}
+                    </div>
+                    <div className={`text-[10px] px-2 py-0.5 rounded-md border ${badge}`}>
+                      {res}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-[11px] text-slate-400 font-mono">
+                    wA={Number.isFinite(wA) ? wA.toFixed(2) : '0.00'} | wB={Number.isFinite(wB) ? wB.toFixed(2) : '0.00'}
+                    {bars.length > 0 ? ` | bars=${bars.join(',')}` : ''}
+                  </div>
+                </div>
+              );
+            })}
+            {(weavePacket?.conflict_map || []).length > 6 && (
+              <div className="text-[11px] text-slate-500">
+                Showing 6 of {(weavePacket?.conflict_map || []).length} conflicts.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* REASONING NARRATIVE - Why the system thinks this */}
       <div className="bg-[#0f1420] rounded-xl p-3 border border-slate-700 flex-1">

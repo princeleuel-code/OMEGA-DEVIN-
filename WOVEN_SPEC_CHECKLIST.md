@@ -55,8 +55,8 @@ Canonical paths (see deprecations):
 
 - [x] Backend produces a `conflict_map` list in the packet
   - Evidence: `omega_ui/omega_backend/app/provenance/weave_packet.py:144-149`
-- [ ] Frontend renders a conflict graph/table from `conflict_map`
-  - Status: **Missing** (type exists but not rendered; see `omega_frontend/src/App.tsx:105-119`)
+- [x] Frontend renders a conflict graph/table from `conflict_map`
+  - Evidence: `omega_frontend/src/App.tsx:1458-1519`
 
 ## Tests
 
@@ -66,4 +66,3 @@ Canonical paths (see deprecations):
   - Evidence: `tests/test_backend_woven_firewall.py:71-164`
 - [x] WhyWait pin schema/sorting unit test
   - Evidence: `tests/test_backend_woven_firewall.py:166-187`
-
