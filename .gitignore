@@ -19,6 +19,7 @@ build/
 # Local outputs / artifacts
 evolution_output/
 data/scans/
+data/paper_trades/
 runs/*
 !runs/sample_data/
 !runs/sample_data/**
