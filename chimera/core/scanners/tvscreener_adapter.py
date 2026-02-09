@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import random
+import sys
 import threading
 import time
 from collections import deque
@@ -60,6 +61,31 @@ _REQUEST_TIMES_LOCK = threading.Lock()
 def _repo_root() -> Path:
     # chimera/core/scanners/tvscreener_adapter.py -> repo root is 3 parents up
     return Path(__file__).resolve().parents[3]
+
+
+def _ensure_tvscreener_importable() -> None:
+    """Best-effort: make deepentropy/tvscreener importable without pip.
+
+    We vendor the upstream package into:
+      chimera/third_party/tvscreener/tvscreener
+
+    This keeps scanner functionality available in offline environments.
+    """
+    try:
+        import tvscreener  # type: ignore  # noqa: F401
+
+        return
+    except Exception:
+        pass
+
+    vendored = _repo_root() / "chimera" / "third_party" / "tvscreener"
+    if not (vendored / "tvscreener").exists():
+        return
+
+    vendored_str = str(vendored)
+    if vendored_str not in sys.path:
+        # Prepend so the vendored package wins if a mismatched global version exists.
+        sys.path.insert(0, vendored_str)
 
 
 def _now_ts() -> float:
@@ -243,6 +269,7 @@ def _pick_field_enum(asset_class: str):
     ac = (asset_class or "").strip().lower()
 
     try:
+        _ensure_tvscreener_importable()
         import tvscreener  # type: ignore  # noqa: F401
     except Exception as e:  # pragma: no cover
         raise ImportError("tvscreener dependency not available") from e
@@ -601,6 +628,7 @@ def healthcheck(*, config_path: Optional[str | Path] = None) -> bool:
     if not cfg.enabled:
         return False
     try:
+        _ensure_tvscreener_importable()
         import tvscreener  # type: ignore  # noqa: F401
 
         return True
