@@ -30,6 +30,7 @@ from app.provenance.weave_packet import (
 from app.provenance.dom_types import RealDOMSnapshot
 from app.provenance.market_data_provider import market_data_registry
 from app.provenance.why_wait import generate_why_wait
+from app.sim_alignment import maybe_align_history_to_mid
 
 # Global provenance firewall
 provenance_firewall = ProvenanceFirewall()
@@ -76,6 +77,7 @@ state = TradingState()
 
 _sim_tasks: Dict[str, asyncio.Task] = {}
 _sim_status: Dict[str, Dict[str, Any]] = {}
+_dom_price_aligned: set[str] = set()
 
 
 def _volatility_for_symbol(symbol: str) -> float:
@@ -124,13 +126,40 @@ def _next_bar(symbol: str, last_close: float) -> dict:
     }
 
 
+def _get_real_dom_mid(symbol: str) -> Optional[float]:
+    """
+    Return mid price from a real DOM snapshot if available.
+    This is used to keep synthetic chart prices on the same axis as real DOM.
+    """
+    try:
+        snapshot = market_data_registry.get_snapshot(symbol)
+        if snapshot and getattr(snapshot, "is_real", False):
+            mid = float(getattr(snapshot, "mid_price", 0.0) or 0.0)
+            return mid if mid > 0.0 else None
+    except Exception:
+        return None
+    return None
+
+
 async def _simulation_loop(symbol: str, interval_s: float, max_history: int = 2000) -> None:
     """Continuously append new bars and update the in-memory dashboard state."""
     sym = symbol.upper()
     while True:
         await asyncio.sleep(interval_s)
         history = state.price_history.setdefault(sym, [])
-        if history:
+        real_mid = _get_real_dom_mid(sym)
+        maybe_align_history_to_mid(
+            sym,
+            history,
+            real_mid,
+            aligned=_dom_price_aligned,
+            current_prices=state.current_prices,
+        )
+
+        if real_mid is not None:
+            # Keep synthetic bars centered on real price scale (still synthetic bars).
+            last_close = float(real_mid)
+        elif history:
             last_close = float(history[-1].get("close", _default_start_price(sym)))
         else:
             last_close = _default_start_price(sym)
@@ -1028,12 +1057,26 @@ async def get_prices():
 @app.get("/api/prices/{symbol}")
 async def get_price_history(symbol: str, bars: int = 200):
     history = state.price_history.get(symbol, [])
+    maybe_align_history_to_mid(
+        symbol,
+        history,
+        _get_real_dom_mid(symbol),
+        aligned=_dom_price_aligned,
+        current_prices=state.current_prices,
+    )
     return history[-bars:] if history else []
 
 @app.get("/api/volume-profile/{symbol}")
 async def get_volume_profile(symbol: str, bars: int = 100, levels: int = 40):
     """Get Volume Profile data for a symbol"""
     history = state.price_history.get(symbol, [])
+    maybe_align_history_to_mid(
+        symbol,
+        history,
+        _get_real_dom_mid(symbol),
+        aligned=_dom_price_aligned,
+        current_prices=state.current_prices,
+    )
     if not history:
         return {"error": "No data available"}
     
@@ -1045,6 +1088,13 @@ async def get_volume_profile(symbol: str, bars: int = 100, levels: int = 40):
 async def get_vwap(symbol: str, bars: int = 100):
     """Get VWAP data for a symbol"""
     history = state.price_history.get(symbol, [])
+    maybe_align_history_to_mid(
+        symbol,
+        history,
+        _get_real_dom_mid(symbol),
+        aligned=_dom_price_aligned,
+        current_prices=state.current_prices,
+    )
     if not history:
         return {"error": "No data available"}
     
@@ -1056,6 +1106,13 @@ async def get_vwap(symbol: str, bars: int = 100):
 async def get_delta(symbol: str, bars: int = 100):
     """Get Cumulative Delta data for a symbol"""
     history = state.price_history.get(symbol, [])
+    maybe_align_history_to_mid(
+        symbol,
+        history,
+        _get_real_dom_mid(symbol),
+        aligned=_dom_price_aligned,
+        current_prices=state.current_prices,
+    )
     if not history:
         return {"error": "No data available"}
     
@@ -1067,6 +1124,13 @@ async def get_delta(symbol: str, bars: int = 100):
 async def get_chart_data(symbol: str, bars: int = 100):
     """Get all chart data in one call - OHLCV, Volume Profile, VWAP, Delta, and Institutional Analytics"""
     history = state.price_history.get(symbol, [])
+    maybe_align_history_to_mid(
+        symbol,
+        history,
+        _get_real_dom_mid(symbol),
+        aligned=_dom_price_aligned,
+        current_prices=state.current_prices,
+    )
     if not history:
         return {"error": "No data available"}
     
@@ -1091,6 +1155,13 @@ async def get_chart_data(symbol: str, bars: int = 100):
 async def get_institutional_analysis(symbol: str, bars: int = 200):
     """Get comprehensive institutional-grade analysis"""
     history = state.price_history.get(symbol, [])
+    maybe_align_history_to_mid(
+        symbol,
+        history,
+        _get_real_dom_mid(symbol),
+        aligned=_dom_price_aligned,
+        current_prices=state.current_prices,
+    )
     if not history:
         return {"error": "No data available"}
     
@@ -1118,6 +1189,13 @@ async def get_institutional_analysis(symbol: str, bars: int = 200):
 async def get_risk_analysis(symbol: str, bars: int = 200):
     """Get risk metrics for a symbol"""
     history = state.price_history.get(symbol, [])
+    maybe_align_history_to_mid(
+        symbol,
+        history,
+        _get_real_dom_mid(symbol),
+        aligned=_dom_price_aligned,
+        current_prices=state.current_prices,
+    )
     if not history:
         return {"error": "No data available"}
     
@@ -2141,6 +2219,15 @@ def get_weave_packet(symbol: str):
     bars = state.price_history.get(symbol, [])
     if not bars:
         return {"error": "No data for symbol", "packet": None}
+
+    # Keep synthetic chart axis aligned with real DOM when available (no effect on firewall).
+    maybe_align_history_to_mid(
+        symbol,
+        bars,
+        _get_real_dom_mid(symbol),
+        aligned=_dom_price_aligned,
+        current_prices=state.current_prices,
+    )
     
     # Get latest bar index
     bar_index = len(bars) - 1
