@@ -6,6 +6,7 @@ from .smart_money import SmartMoneyDetector, OrderBlock, FairValueGap, Liquidity
 from .regime_classifier import AdaptiveRegimeClassifier, MarketRegime
 from .position_sizer import IntelligentPositionSizer, KellyCriterion
 from .confluence_engine import ConfluenceEngine, ConfluenceSignal
+from .aether_indicator import AetherIndicator, AetherConfig, AetherState
 
 __all__ = [
     'MultiTimeframeAnalyzer',
@@ -20,4 +21,7 @@ __all__ = [
     'KellyCriterion',
     'ConfluenceEngine',
     'ConfluenceSignal',
+    'AetherIndicator',
+    'AetherConfig',
+    'AetherState',
 ]

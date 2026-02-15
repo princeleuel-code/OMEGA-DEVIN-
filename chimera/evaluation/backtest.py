@@ -432,6 +432,34 @@ class Backtester:
             no_trade_decisions=self._no_trades,
             manifest=manifest
         )
+
+    def _aether_gate_failure(self, feat: Features, genome: StrategyGenome) -> Optional[str]:
+        """Return AETHER gate failure reason, or None if gate passes."""
+        if not genome.use_aether_gate:
+            return None
+
+        payload = feat.aether if isinstance(feat.aether, dict) else None
+        if not payload:
+            return "AETHER gate enabled but no AETHER payload"
+
+        s = float(payload.get("S", 1.0))
+        n = float(payload.get("N", 0.0))
+        pc = float(payload.get("Pc", 0.0))
+        f = abs(float(payload.get("F", 0.0)))
+        seam = bool(payload.get("SEAM", False))
+
+        if s > genome.aether_entropy_max:
+            return f"AETHER entropy too high ({s:.2f})"
+        if n < genome.aether_coherence_min:
+            return f"AETHER coherence too low ({n:.2f})"
+        if pc < genome.aether_pc_min:
+            return f"AETHER cycle confidence too low ({pc:.2f})"
+        if f < genome.aether_force_min:
+            return f"AETHER force too weak ({f:.2f})"
+        if genome.aether_block_on_seam and seam and f < genome.aether_seam_force_override:
+            return "AETHER seam active without force override"
+
+        return None
     
     def _default_signal_generator(
         self,
@@ -457,6 +485,11 @@ class Backtester:
         # Check for displacement if required
         if genome.require_displacement and not feat.displacement:
             return create_wait_signal("No displacement")
+
+        # Check AETHER regime gate (tradable vs untradable state)
+        aether_failure = self._aether_gate_failure(feat, genome)
+        if aether_failure:
+            return create_wait_signal(aether_failure)
         
         # Check structure
         structure = feat.structure

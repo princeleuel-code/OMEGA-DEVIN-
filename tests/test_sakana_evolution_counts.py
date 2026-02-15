@@ -23,9 +23,9 @@ class _StubHarness:
     def __init__(self) -> None:
         self.config = _StubHarnessConfig()
 
-    def evaluate(self, variant_config, data, manifest):  # type: ignore[no-untyped-def]
+    def evaluate(self, variant_config, data, manifest, variant_id=None):  # type: ignore[no-untyped-def]
         return EvalReport(
-            variant_id="stub",
+            variant_id=variant_id or "stub",
             manifest_id=manifest.run_id,
             evaluated_at="stub",
             folds=[],
@@ -54,4 +54,3 @@ class TestSakanaEvolutionCounts(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

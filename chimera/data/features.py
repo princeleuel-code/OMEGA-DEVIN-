@@ -11,6 +11,7 @@ from enum import Enum, auto
 import math
 
 from .loader import OHLCV
+from ..intelligence.aether_indicator import AetherIndicator
 
 
 class StructureType(Enum):
@@ -83,6 +84,9 @@ class Features:
     displacement: bool
     displacement_direction: Optional[int] = None  # 1 for up, -1 for down
     
+    # AETHER topological/spectral state vector
+    aether: Optional[Dict[str, Any]] = None
+    
     def to_dict(self) -> Dict[str, Any]:
         return {
             "timestamp": self.timestamp.isoformat(),
@@ -94,7 +98,8 @@ class Features:
             "relative_volume": self.relative_volume,
             "structure": self.structure.to_dict(),
             "displacement": self.displacement,
-            "displacement_direction": self.displacement_direction
+            "displacement_direction": self.displacement_direction,
+            "aether": self.aether,
         }
 
 
@@ -147,6 +152,10 @@ class FeatureEngine:
         # Find swing points
         self._find_swing_points(data)
         
+        # Compute AETHER series once for the entire run
+        aether_indicator = AetherIndicator()
+        aether_series = aether_indicator.compute(data)
+        
         # Compute features for each bar (after warmup period)
         warmup = max(self.atr_period, self.momentum_period, self.volume_period)
         
@@ -183,7 +192,8 @@ class FeatureEngine:
                 relative_volume=relative_volume,
                 structure=structure,
                 displacement=displacement,
-                displacement_direction=disp_dir
+                displacement_direction=disp_dir,
+                aether=aether_series[i].to_dict() if i < len(aether_series) else None,
             )
             features.append(feat)
         

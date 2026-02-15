@@ -94,20 +94,54 @@ class DataLoader:
         
         with open(path, "r") as f:
             reader = csv.DictReader(f)
+            skipped = 0
             for row in reader:
                 try:
+                    row_norm = {}
+                    for k, v in row.items():
+                        if k is None:
+                            continue
+                        key = str(k).strip().lower().replace("\ufeff", "")
+                        # Some exports use MetaTrader-style angle-bracket headers:
+                        # <open>, <high>, <low>, <close>, <tickvol>, etc.
+                        if key.startswith("<") and key.endswith(">") and len(key) > 2:
+                            key = key[1:-1]
+                        row_norm[key] = v
+
+                    ts_raw = (
+                        row_norm.get("timestamp")
+                        or row_norm.get("date")
+                        or row_norm.get("time")
+                        or row_norm.get("datetime")
+                    )
+                    if ts_raw is None:
+                        raise KeyError("timestamp/date")
+
+                    vol_raw = (
+                        row_norm.get("volume")
+                        or row_norm.get("tick_volume")
+                        or row_norm.get("tickvolume")
+                        or row_norm.get("tickvol")
+                        or row_norm.get("vol")
+                        or 0
+                    )
+
                     bar = OHLCV(
-                        timestamp=datetime.strptime(row["timestamp"], date_format),
-                        open=float(row["open"]),
-                        high=float(row["high"]),
-                        low=float(row["low"]),
-                        close=float(row["close"]),
-                        volume=float(row.get("volume", 0)),
+                        timestamp=datetime.strptime(str(ts_raw), date_format),
+                        open=float(row_norm["open"]),
+                        high=float(row_norm["high"]),
+                        low=float(row_norm["low"]),
+                        close=float(row_norm["close"]),
+                        volume=float(vol_raw),
                         symbol=self.symbol
                     )
                     self._data.append(bar)
                 except (KeyError, ValueError) as e:
-                    logger.warning(f"Skipping invalid row: {e}")
+                    skipped += 1
+                    if skipped <= 5:
+                        logger.warning(f"Skipping invalid row: {e}")
+            if skipped > 5:
+                logger.warning(f"Skipped {skipped} invalid rows while loading {path}")
         
         logger.info(f"Loaded {len(self._data)} bars from {path}")
         return self._data
