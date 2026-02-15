@@ -66,6 +66,13 @@ def mutate_genome(
     child.min_atr = mutate_float(child.min_atr, cfg.min_atr)
     child.max_spread_atr_ratio = mutate_float(child.max_spread_atr_ratio, cfg.max_spread_atr_ratio)
     child.min_volume_ratio = mutate_float(child.min_volume_ratio, cfg.min_volume_ratio)
+    child.use_aether_gate = mutate_bool(child.use_aether_gate)
+    child.aether_entropy_max = mutate_float(child.aether_entropy_max, cfg.aether_entropy_max)
+    child.aether_coherence_min = mutate_float(child.aether_coherence_min, cfg.aether_coherence_min)
+    child.aether_pc_min = mutate_float(child.aether_pc_min, cfg.aether_pc_min)
+    child.aether_force_min = mutate_float(child.aether_force_min, cfg.aether_force_min)
+    child.aether_block_on_seam = mutate_bool(child.aether_block_on_seam)
+    child.aether_seam_force_override = mutate_float(child.aether_seam_force_override, cfg.aether_seam_force_override)
     child.trend_affinity = mutate_float(child.trend_affinity, (0.0, 1.0))
     child.volatility_affinity = mutate_float(child.volatility_affinity, (0.0, 1.0))
     
@@ -110,7 +117,10 @@ def crossover_genomes(
         "require_displacement", "require_structure_break", "min_swing_distance",
         "risk_per_trade_pct", "max_trades_per_day", "max_drawdown_pct",
         "hold_bars_min", "hold_bars_max", "min_atr", "max_spread_atr_ratio",
-        "min_volume_ratio", "trend_affinity", "volatility_affinity"
+        "min_volume_ratio", "use_aether_gate", "aether_entropy_max",
+        "aether_coherence_min", "aether_pc_min", "aether_force_min",
+        "aether_block_on_seam", "aether_seam_force_override",
+        "trend_affinity", "volatility_affinity"
     ]
     
     for param in params:
@@ -176,6 +186,13 @@ def blend_genomes(
     child.min_atr = blend_float(parent1.min_atr, parent2.min_atr)
     child.max_spread_atr_ratio = blend_float(parent1.max_spread_atr_ratio, parent2.max_spread_atr_ratio)
     child.min_volume_ratio = blend_float(parent1.min_volume_ratio, parent2.min_volume_ratio)
+    child.use_aether_gate = blend_bool(parent1.use_aether_gate, parent2.use_aether_gate)
+    child.aether_entropy_max = blend_float(parent1.aether_entropy_max, parent2.aether_entropy_max)
+    child.aether_coherence_min = blend_float(parent1.aether_coherence_min, parent2.aether_coherence_min)
+    child.aether_pc_min = blend_float(parent1.aether_pc_min, parent2.aether_pc_min)
+    child.aether_force_min = blend_float(parent1.aether_force_min, parent2.aether_force_min)
+    child.aether_block_on_seam = blend_bool(parent1.aether_block_on_seam, parent2.aether_block_on_seam)
+    child.aether_seam_force_override = blend_float(parent1.aether_seam_force_override, parent2.aether_seam_force_override)
     child.trend_affinity = blend_float(parent1.trend_affinity, parent2.trend_affinity)
     child.volatility_affinity = blend_float(parent1.volatility_affinity, parent2.volatility_affinity)
     

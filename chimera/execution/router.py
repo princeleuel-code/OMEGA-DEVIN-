@@ -67,8 +67,9 @@ class Router:
         Returns a Signal with action, confidence, and levels.
         """
         # Pre-checks
-        if not self._passes_prechecks(features, genome):
-            return create_wait_signal("Failed prechecks")
+        precheck_failure = self._get_precheck_failure(features, genome)
+        if precheck_failure:
+            return create_wait_signal(precheck_failure)
         
         # Detect setup type
         setup_type, direction = self._detect_setup(features, genome)
@@ -104,19 +105,56 @@ class Router:
     
     def _passes_prechecks(self, features: Features, genome: StrategyGenome) -> bool:
         """Check if basic requirements are met"""
+        return self._get_precheck_failure(features, genome) is None
+
+    def _get_precheck_failure(self, features: Features, genome: StrategyGenome) -> Optional[str]:
+        """Return precheck failure reason, or None if all checks pass."""
         # ATR check
         if features.atr < genome.min_atr:
-            return False
+            return "ATR too low"
         
         # Volume check
         if features.relative_volume < genome.min_volume_ratio:
-            return False
+            return "Volume too low"
         
         # Displacement check (if required)
         if genome.require_displacement and not features.displacement:
-            return False
+            return "No displacement"
+
+        # AETHER regime gate
+        aether_failure = self._aether_gate_failure(features, genome)
+        if aether_failure:
+            return aether_failure
         
-        return True
+        return None
+
+    def _aether_gate_failure(self, features: Features, genome: StrategyGenome) -> Optional[str]:
+        """Return AETHER gate failure reason, or None if gate passes."""
+        if not genome.use_aether_gate:
+            return None
+
+        payload = features.aether if isinstance(features.aether, dict) else None
+        if not payload:
+            return "AETHER gate enabled but no AETHER payload"
+
+        s = float(payload.get("S", 1.0))
+        n = float(payload.get("N", 0.0))
+        pc = float(payload.get("Pc", 0.0))
+        f = abs(float(payload.get("F", 0.0)))
+        seam = bool(payload.get("SEAM", False))
+
+        if s > genome.aether_entropy_max:
+            return f"AETHER entropy too high ({s:.2f})"
+        if n < genome.aether_coherence_min:
+            return f"AETHER coherence too low ({n:.2f})"
+        if pc < genome.aether_pc_min:
+            return f"AETHER cycle confidence too low ({pc:.2f})"
+        if f < genome.aether_force_min:
+            return f"AETHER force too weak ({f:.2f})"
+        if genome.aether_block_on_seam and seam and f < genome.aether_seam_force_override:
+            return "AETHER seam active without force override"
+
+        return None
     
     def _detect_setup(
         self,
@@ -289,6 +327,24 @@ class Router:
             "volume_ok": features.relative_volume >= genome.min_volume_ratio,
             "displacement_ok": not genome.require_displacement or features.displacement
         }
+
+        if genome.use_aether_gate:
+            payload = features.aether if isinstance(features.aether, dict) else {}
+            a_s = float(payload.get("S", 1.0))
+            a_n = float(payload.get("N", 0.0))
+            a_pc = float(payload.get("Pc", 0.0))
+            a_f = abs(float(payload.get("F", 0.0)))
+            a_seam = bool(payload.get("SEAM", False))
+            analysis["precheck_details"]["aether"] = {
+                "enabled": True,
+                "entropy_ok": a_s <= genome.aether_entropy_max,
+                "coherence_ok": a_n >= genome.aether_coherence_min,
+                "pc_ok": a_pc >= genome.aether_pc_min,
+                "force_ok": a_f >= genome.aether_force_min,
+                "seam_ok": (not genome.aether_block_on_seam)
+                or (not a_seam)
+                or (a_f >= genome.aether_seam_force_override),
+            }
         
         # Detect setup
         setup_type, direction = self._detect_setup(features, genome)

@@ -29,6 +29,8 @@ import logging
 import os
 import random
 import subprocess
+import math
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
@@ -184,6 +186,7 @@ class VariantPatch:
         new_config: Dict[str, Any],
         parent_id: str,
         patch_budget_max: int = 5,
+        patch_budget_used: Optional[int] = None,
     ) -> "VariantPatch":
         """Create a patch from two configs."""
         variant_id = hashlib.md5(
@@ -202,7 +205,10 @@ class VariantPatch:
             parent_id=parent_id,
             created_at=datetime.now(timezone.utc).isoformat(),
             config_diffs=diffs,
-            patch_budget_used=len(diffs),
+            patch_budget_used=min(
+                len(diffs) if patch_budget_used is None else patch_budget_used,
+                patch_budget_max,
+            ),
             patch_budget_max=patch_budget_max,
         )
 
@@ -611,6 +617,7 @@ def mutate_config(
         new_config.to_dict(),
         parent_id=hashlib.md5(json.dumps(parent_dict, sort_keys=True).encode()).hexdigest()[:12],
         patch_budget_max=patch_budget,
+        patch_budget_used=len(params_to_mutate),
     )
     
     return new_config, patch
@@ -636,6 +643,7 @@ class EvalConfig:
     # Pass criteria
     max_drawdown_threshold: float = 10.0  # Percent
     min_sharpe_threshold: float = 0.5
+    min_trades_per_fold: int = 3
     max_turnover_threshold: float = 50  # Trades per period
     stability_threshold: float = 0.5  # Std of returns across folds
     
@@ -660,6 +668,7 @@ class EvaluationHarness:
         variant_config: EvolutionConfig,
         data: List[Any],  # List of OHLCV bars
         manifest: RunManifest,
+        variant_id: Optional[str] = None,
     ) -> EvalReport:
         """
         Evaluate a variant using walk-forward methodology.
@@ -672,7 +681,7 @@ class EvaluationHarness:
         Returns:
             EvalReport with all results
         """
-        variant_id = hashlib.md5(
+        resolved_variant_id = variant_id or hashlib.md5(
             json.dumps(variant_config.to_dict(), sort_keys=True).encode()
         ).hexdigest()[:12]
         
@@ -680,7 +689,7 @@ class EvaluationHarness:
         integrity_violations = self._check_integrity(data)
         if integrity_violations:
             return EvalReport(
-                variant_id=variant_id,
+                variant_id=resolved_variant_id,
                 manifest_id=manifest.run_id,
                 evaluated_at=datetime.now(timezone.utc).isoformat(),
                 folds=[],
@@ -743,7 +752,7 @@ class EvaluationHarness:
         passed_all = all(gate_results.values())
         
         return EvalReport(
-            variant_id=variant_id,
+            variant_id=resolved_variant_id,
             manifest_id=manifest.run_id,
             evaluated_at=datetime.now(timezone.utc).isoformat(),
             folds=folds,
@@ -956,6 +965,9 @@ class EvaluationHarness:
         """Check if fold passes criteria."""
         fail_reasons = []
         
+        if metrics["turnover"] < self.config.min_trades_per_fold:
+            fail_reasons.append(f"LOW_TURNOVER_{metrics['turnover']}<{self.config.min_trades_per_fold}")
+        
         if metrics["max_drawdown"] > self.config.max_drawdown_threshold:
             fail_reasons.append(f"MAX_DD_{metrics['max_drawdown']:.1f}PCT")
         
@@ -999,6 +1011,9 @@ class EvaluationHarness:
         
         # Sharpe gate
         gates["min_sharpe"] = bool(aggregate.get("sharpe", 0) >= self.config.min_sharpe_threshold)
+
+        # Minimum turnover gate
+        gates["min_turnover"] = bool(aggregate.get("turnover", 0) >= self.config.min_trades_per_fold)
         
         # Turnover gate
         gates["max_turnover"] = bool(aggregate.get("turnover", 100) <= self.config.max_turnover_threshold)
@@ -1043,6 +1058,7 @@ class QualityDiversityArchive:
         eval_report: EvalReport,
         manifest_id: str,
         eval_report_path: str,
+        eligible_for_archive: bool = True,
     ) -> bool:
         """
         Try to add a variant to the archive.
@@ -1051,7 +1067,7 @@ class QualityDiversityArchive:
         """
         self.total_evaluated += 1
         
-        if not eval_report.passed_all_gates:
+        if not eligible_for_archive or not eval_report.passed_all_gates:
             return False
         
         # Determine buckets
@@ -1328,10 +1344,28 @@ class EvolutionLoopConfig:
     
     # Champion testing
     min_improvement_pct: float = 5.0
+
+    # Attack phase (adversarial stress before promotion)
+    attack_enabled: bool = True
+    attack_min_pass_rate: float = 0.67
+    attack_max_fitness_degradation: float = 0.50
+    attack_drop_every_n: int = 20
+    attack_noise_sigma: float = 0.0007
+    attack_aether_enabled: bool = True
+    attack_aether_window_bars: int = 240
+    attack_entropy_window: int = 64
     
     # Canary deployment
     canary_trades_required: int = 10
     canary_max_dd_pct: float = 5.0
+
+    # Reliability engineering
+    eval_retry_attempts: int = 2
+    eval_retry_backoff_seconds: float = 0.25
+    auto_resume: bool = True
+    watchdog_enabled: bool = True
+    watchdog_stale_seconds: int = 900
+    long_horizon_memory_enabled: bool = True
     
     # Output
     output_dir: str = "evolution_output"
@@ -1371,6 +1405,9 @@ class EvolutionLoop:
         # Output directory
         self.output_dir = Path(self.config.output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.failure_archive_path = self.output_dir / "FAILURE_ARCHIVE.jsonl"
+        self.watchdog_path = self.output_dir / "WATCHDOG_HEARTBEAT.json"
+        self.round_memory_path = self.output_dir / "ROUND_MEMORY.jsonl"
     
     def run(
         self,
@@ -1390,12 +1427,18 @@ class EvolutionLoop:
             Summary of evolution run
         """
         max_rounds = max_rounds or self.config.max_rounds
-        
-        # Initialize
-        if initial_config is None:
-            initial_config = EvolutionConfig()
-        self.current_champion = initial_config
-        
+
+        resumed_from_state = False
+        if self.config.auto_resume:
+            resumed_from_state = self._resume_state_if_available()
+
+        # Initialize champion, allowing explicit initial config to override resume.
+        if initial_config is not None:
+            self.current_champion = initial_config
+        elif self.current_champion is None:
+            self.current_champion = EvolutionConfig()
+        assert self.current_champion is not None
+
         # Create run manifest
         cost_model = {
             "spread_pips": self.harness.config.spread_pips,
@@ -1410,28 +1453,36 @@ class EvolutionLoop:
             cost_model=cost_model,
         )
         manifest.save(self.output_dir / f"RUN_MANIFEST_{manifest.run_id}.json")
-        
-        # Initialize live gating state
-        self.live_state = LiveGatingState(
-            updated_at=datetime.now(timezone.utc).isoformat(),
-            active_variant_id="initial",
-            active_config=initial_config.to_dict(),
-            canary_mode=CanaryMode.OFF.value,
-            canary_start_time=None,
-            canary_trades=0,
-            canary_pnl=0.0,
-            kill_switch_active=False,
-            kill_switch_reason=None,
-            previous_variant_id=None,
-            max_drawdown_threshold=self.config.canary_max_dd_pct,
-            anomaly_threshold=3.0,
-        )
+
+        # Initialize live gating state if not resumed.
+        if self.live_state is None:
+            self.live_state = LiveGatingState(
+                updated_at=datetime.now(timezone.utc).isoformat(),
+                active_variant_id="initial",
+                active_config=self.current_champion.to_dict(),
+                canary_mode=CanaryMode.OFF.value,
+                canary_start_time=None,
+                canary_trades=0,
+                canary_pnl=0.0,
+                kill_switch_active=False,
+                kill_switch_reason=None,
+                previous_variant_id=None,
+                max_drawdown_threshold=self.config.canary_max_dd_pct,
+                anomaly_threshold=3.0,
+            )
+
+        self._check_for_stale_watchdog()
+        self._write_watchdog("RUN_START", {"max_rounds": max_rounds, "data_bars": len(data), "resumed": resumed_from_state})
         
         logger.info(f"Starting evolution loop for {max_rounds} rounds")
         
         # Run rounds
+        rounds_executed = 0
+        start_round = int(self.archive.generation)
         for round_num in range(max_rounds):
-            self.round = round_num
+            self.round = start_round + round_num
+            rounds_executed += 1
+            self._write_watchdog("ROUND_START", {"round": self.round})
             
             round_result = self._run_round(data, manifest)
             
@@ -1444,21 +1495,29 @@ class EvolutionLoop:
             
             if self.stagnation >= self.config.stagnation_limit:
                 logger.info(f"Stopping due to stagnation at round {round_num}")
+                self._record_round_memory(round_result=round_result, manifest_id=manifest.run_id)
+                self._save_state()
+                self._write_watchdog("EARLY_STOP", {"reason": "STAGNATION", "round": self.round})
                 break
-            
+
+            self._record_round_memory(round_result=round_result, manifest_id=manifest.run_id)
+            self._save_state()
+            self._write_watchdog("ROUND_COMPLETE", {"round": self.round})
             self.archive.increment_generation()
         
         # Save final state
         self._save_state()
+        self._write_watchdog("RUN_COMPLETE", {"rounds_executed": rounds_executed})
         
         # Summary
         summary = {
-            "rounds_completed": self.round + 1,
+            "rounds_completed": rounds_executed,
             "total_variants_evaluated": self.archive.total_evaluated,
             "best_fitness": self.best_fitness,
             "archive_size": sum(len(b) for b in self.archive.buckets.values()),
             "final_champion": self.current_champion.to_dict() if self.current_champion else None,
             "manifest_id": manifest.run_id,
+            "resumed_from_state": resumed_from_state,
         }
         
         logger.info(f"Evolution complete: {summary}")
@@ -1476,6 +1535,8 @@ class EvolutionLoop:
             "round": self.round,
             "variants_generated": 0,
             "variants_passed": 0,
+            "variants_attacked": 0,
+            "attack_failed": 0,
             "best_fitness": float("-inf"),
             "promoted": False,
         }
@@ -1486,8 +1547,63 @@ class EvolutionLoop:
         
         # Evaluate each variant
         for variant_config, patch in variants:
-            # Evaluate
-            report = self.harness.evaluate(variant_config, data, manifest)
+            report, eval_error = self._evaluate_with_retries(
+                harness=self.harness,
+                variant_config=variant_config,
+                data=data,
+                manifest=manifest,
+                variant_id=patch.variant_id,
+                stage="EVALUATION",
+                context={"round": self.round},
+            )
+            if report is None:
+                report = self._build_exception_report(
+                    variant_id=patch.variant_id,
+                    manifest_id=manifest.run_id,
+                    error=eval_error or "UNKNOWN_EVALUATION_ERROR",
+                )
+
+            attack_passed = True
+            attack_report: Dict[str, Any] = {
+                "variant_id": patch.variant_id,
+                "enabled": self.config.attack_enabled,
+                "skipped": True,
+                "passed": True,
+                "scenarios": [],
+            }
+
+            if report.passed_all_gates and self.config.attack_enabled:
+                round_result["variants_attacked"] += 1
+                attack_passed, attack_report = self._run_attack_phase(
+                    variant_id=patch.variant_id,
+                    variant_config=variant_config,
+                    base_report=report,
+                    data=data,
+                    manifest=manifest,
+                )
+                attack_report_path = self.output_dir / f"ATTACK_REPORT_{patch.variant_id}.json"
+                with open(attack_report_path, "w") as f:
+                    json.dump(attack_report, f, indent=2)
+                if not attack_passed:
+                    round_result["attack_failed"] += 1
+                    self._record_failure(
+                        variant_id=patch.variant_id,
+                        stage="ATTACK",
+                        reason="SCENARIO_FAILURE",
+                        details=attack_report,
+                    )
+            elif not report.passed_all_gates:
+                self._record_failure(
+                    variant_id=patch.variant_id,
+                    stage="EVALUATION",
+                    reason="GATE_FAILURE",
+                    details={
+                        "gate_failures": [k for k, v in report.gate_results.items() if not v],
+                        "fold_fail_reasons": sorted(
+                            {r for fold in report.folds for r in fold.fail_reasons}
+                        ),
+                    },
+                )
             
             # Save eval report
             report_path = self.output_dir / f"EVAL_REPORT_{patch.variant_id}.json"
@@ -1506,9 +1622,10 @@ class EvolutionLoop:
                 eval_report=report,
                 manifest_id=manifest.run_id,
                 eval_report_path=str(report_path),
+                eligible_for_archive=attack_passed,
             )
             
-            if report.passed_all_gates:
+            if report.passed_all_gates and attack_passed:
                 round_result["variants_passed"] += 1
                 
                 # Calculate fitness
@@ -1518,14 +1635,24 @@ class EvolutionLoop:
                 
                 # Test against champions for promotion
                 if fitness > self.best_fitness:
-                    passed, comparison = self.champion_tester.test_against_champions(
-                        candidate=variant_config,
-                        candidate_report=report,
-                        current_champion=self.current_champion,
-                        archive=self.archive,
-                        test_data=data[-self.harness.config.test_bars:],
-                        manifest=manifest,
-                    )
+                    try:
+                        passed, comparison = self.champion_tester.test_against_champions(
+                            candidate=variant_config,
+                            candidate_report=report,
+                            current_champion=self.current_champion,
+                            archive=self.archive,
+                            test_data=data[-self.harness.config.test_bars:],
+                            manifest=manifest,
+                        )
+                    except Exception as exc:
+                        passed = False
+                        comparison = {"error": str(exc)}
+                        self._record_failure(
+                            variant_id=patch.variant_id,
+                            stage="PROMOTION_TEST",
+                            reason="EXCEPTION",
+                            details={"error": str(exc)},
+                        )
                     
                     if passed:
                         self._promote_variant(variant_config, patch.variant_id)
@@ -1545,6 +1672,627 @@ class EvolutionLoop:
         )
         
         return round_result
+
+    def _run_attack_phase(
+        self,
+        variant_id: str,
+        variant_config: EvolutionConfig,
+        base_report: EvalReport,
+        data: List[Any],
+        manifest: RunManifest,
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """Run adversarial attack scenarios before variant can be promoted."""
+        base_fitness = self._calculate_fitness(base_report)
+        scenarios = self._build_attack_scenarios(data, variant_id)
+
+        if not scenarios:
+            return True, {
+                "variant_id": variant_id,
+                "enabled": True,
+                "skipped": True,
+                "passed": True,
+                "reason": "NO_SCENARIOS",
+                "scenarios": [],
+            }
+
+        scenario_results: List[Dict[str, Any]] = []
+        pass_count = 0
+
+        for scenario in scenarios:
+            harness = self._get_attack_harness(
+                spread_mult=scenario["spread_mult"],
+                slippage_mult=scenario["slippage_mult"],
+            )
+            report, eval_error = self._evaluate_with_retries(
+                harness=harness,
+                variant_config=variant_config,
+                data=scenario["data"],
+                manifest=manifest,
+                variant_id=variant_id,
+                stage="ATTACK",
+                context={"scenario": scenario["name"]},
+            )
+            if report is None:
+                report = self._build_exception_report(
+                    variant_id=variant_id,
+                    manifest_id=manifest.run_id,
+                    error=eval_error or f"ATTACK_EVAL_FAILED:{scenario['name']}",
+                )
+            scen_fitness = self._calculate_fitness(report)
+
+            min_allowed_fitness = base_fitness - (abs(base_fitness) * self.config.attack_max_fitness_degradation + 0.25)
+            fitness_ok = scen_fitness >= min_allowed_fitness
+
+            scenario_passed = bool(report.passed_all_gates and fitness_ok)
+            if scenario_passed:
+                pass_count += 1
+
+            scenario_results.append(
+                {
+                    "name": scenario["name"],
+                    "spread_mult": scenario["spread_mult"],
+                    "slippage_mult": scenario["slippage_mult"],
+                    "bars": len(scenario["data"]),
+                    "passed": scenario_passed,
+                    "passed_all_gates": report.passed_all_gates,
+                    "fitness": scen_fitness,
+                    "base_fitness": base_fitness,
+                    "min_allowed_fitness": min_allowed_fitness,
+                    "gate_failures": [k for k, v in report.gate_results.items() if not v],
+                    "fold_fail_reasons": sorted({r for fold in report.folds for r in fold.fail_reasons}),
+                    "integrity_violations": report.integrity_violations,
+                    "eval_error": eval_error,
+                }
+            )
+
+        min_passes = max(1, math.ceil(len(scenarios) * self.config.attack_min_pass_rate))
+        passed = pass_count >= min_passes
+
+        return passed, {
+            "variant_id": variant_id,
+            "enabled": True,
+            "skipped": False,
+            "passed": passed,
+            "min_passes_required": min_passes,
+            "passes_observed": pass_count,
+            "scenarios": scenario_results,
+        }
+
+    def _build_attack_scenarios(self, data: List[Any], variant_id: str) -> List[Dict[str, Any]]:
+        """Construct adversarial scenarios for stress testing."""
+        if not data:
+            return []
+
+        scenarios: List[Dict[str, Any]] = [
+            {
+                "name": "COST_STRESS_X2",
+                "data": data,
+                "spread_mult": 2.0,
+                "slippage_mult": 2.0,
+            },
+            {
+                "name": "COST_STRESS_X3",
+                "data": data,
+                "spread_mult": 3.0,
+                "slippage_mult": 3.0,
+            },
+        ]
+
+        dropped = self._drop_bars(data, self.config.attack_drop_every_n)
+        if dropped:
+            scenarios.append(
+                {
+                    "name": "DATA_DROPOUT",
+                    "data": dropped,
+                    "spread_mult": 1.0,
+                    "slippage_mult": 1.0,
+                }
+            )
+
+        noisy = self._inject_price_noise(data, variant_id, self.config.attack_noise_sigma)
+        if noisy:
+            scenarios.append(
+                {
+                    "name": "PRICE_NOISE",
+                    "data": noisy,
+                    "spread_mult": 1.0,
+                    "slippage_mult": 1.0,
+                }
+            )
+
+        if self.config.attack_aether_enabled:
+            scenarios.extend(self._build_aether_attack_scenarios(data))
+
+        return scenarios
+
+    def _build_aether_attack_scenarios(self, data: List[Any]) -> List[Dict[str, Any]]:
+        """
+        Build structural attack windows using Aether-style Tier-3 proxies:
+        - entropy spike window
+        - seam spike window
+        - transition (entropy derivative) window
+        """
+        import numpy as np
+
+        extracted = self._extract_ohlc_arrays(data)
+        if extracted is None:
+            return []
+        highs, lows, closes = extracted
+        n = len(closes)
+        if n < 120:
+            return []
+
+        min_required = max(
+            80,
+            int(getattr(self.harness.config, "train_bars", 50)) + int(getattr(self.harness.config, "test_bars", 30)),
+        )
+        if n < min_required:
+            return []
+
+        window_len = min(
+            n,
+            max(min_required, int(self.config.attack_aether_window_bars)),
+        )
+
+        entropy = self._rolling_entropy(closes, window=max(16, int(self.config.attack_entropy_window)))
+        seam = self._seam_proxy(highs, lows, closes)
+        transition = np.abs(np.diff(entropy, prepend=entropy[0]))
+
+        idx_entropy = self._argmax_finite(entropy)
+        idx_seam = self._argmax_finite(np.abs(seam))
+        idx_transition = self._argmax_finite(transition)
+
+        candidate_specs = [
+            ("AETHER_ENTROPY_SPIKE", idx_entropy, 1.4, 1.4),
+            ("AETHER_SEAM_SPIKE", idx_seam, 1.6, 1.6),
+            ("AETHER_TRANSITION_ZONE", idx_transition, 1.3, 1.3),
+        ]
+
+        scenarios: List[Dict[str, Any]] = []
+        seen_ranges = set()
+        for name, idx, spread_mult, slippage_mult in candidate_specs:
+            if idx is None:
+                continue
+            start, end = self._window_bounds(n=n, center_idx=idx, window_len=window_len)
+            if (start, end) in seen_ranges:
+                continue
+            seen_ranges.add((start, end))
+            window_data = data[start:end]
+            if len(window_data) < min_required:
+                continue
+            scenarios.append(
+                {
+                    "name": name,
+                    "data": window_data,
+                    "spread_mult": spread_mult,
+                    "slippage_mult": slippage_mult,
+                    "window_start": start,
+                    "window_end": end,
+                }
+            )
+        return scenarios
+
+    def _extract_ohlc_arrays(self, data: List[Any]) -> Optional[Tuple[Any, Any, Any]]:
+        """Extract OHLC arrays from dict/object bars; returns None if unavailable."""
+        import numpy as np
+
+        highs: List[float] = []
+        lows: List[float] = []
+        closes: List[float] = []
+        for bar in data:
+            h = self._get_field(bar, "high")
+            l = self._get_field(bar, "low")
+            c = self._get_field(bar, "close")
+            if h is None or l is None or c is None:
+                return None
+            try:
+                highs.append(float(h))
+                lows.append(float(l))
+                closes.append(float(c))
+            except Exception:
+                return None
+        return np.asarray(highs, dtype=float), np.asarray(lows, dtype=float), np.asarray(closes, dtype=float)
+
+    def _rolling_entropy(self, close: Any, window: int) -> Any:
+        """Normalized rolling Shannon entropy of return buckets (0..1)."""
+        import numpy as np
+
+        if len(close) < window + 2:
+            return np.full(len(close), np.nan)
+
+        returns = np.diff(close, prepend=close[0]) / np.maximum(np.abs(close), 1e-12)
+        bins = np.array([-np.inf, -0.003, -0.002, -0.001, 0.0, 0.001, 0.002, 0.003, np.inf], dtype=float)
+        out = np.full(len(close), np.nan)
+        norm = np.log(len(bins) - 1) + 1e-12
+        for i in range(window, len(close)):
+            chunk = returns[i - window : i]
+            hist, _ = np.histogram(chunk, bins=bins)
+            total = hist.sum()
+            if total <= 0:
+                continue
+            p = hist / total
+            p = p[p > 0]
+            out[i] = float(-np.sum(p * np.log(p)) / norm)
+        return out
+
+    def _rolling_mean(self, arr: Any, window: int) -> Any:
+        import numpy as np
+
+        arr = np.asarray(arr, dtype=float)
+        out = np.full(len(arr), np.nan)
+        if window <= 0 or len(arr) < window:
+            return out
+        for i in range(window - 1, len(arr)):
+            chunk = arr[i - window + 1 : i + 1]
+            finite = chunk[np.isfinite(chunk)]
+            if len(finite) == 0:
+                continue
+            out[i] = float(np.mean(finite))
+        return out
+
+    def _rolling_std(self, arr: Any, window: int) -> Any:
+        import numpy as np
+
+        arr = np.asarray(arr, dtype=float)
+        out = np.full(len(arr), np.nan)
+        if window <= 1 or len(arr) < window:
+            return out
+        for i in range(window - 1, len(arr)):
+            chunk = arr[i - window + 1 : i + 1]
+            finite = chunk[np.isfinite(chunk)]
+            if len(finite) < 2:
+                continue
+            out[i] = float(np.std(finite))
+        return out
+
+    def _seam_proxy(self, high: Any, low: Any, close: Any) -> Any:
+        """ATR acceleration z-score seam proxy."""
+        import numpy as np
+
+        prev_close = np.roll(close, 1)
+        prev_close[0] = close[0]
+        tr = np.maximum.reduce(
+            [
+                np.abs(high - low),
+                np.abs(high - prev_close),
+                np.abs(low - prev_close),
+            ]
+        )
+        atr = self._rolling_mean(tr, window=32)
+        atr_base = self._rolling_mean(atr, window=16)
+        atr_std = self._rolling_std(atr, window=64)
+        return (atr - atr_base) / (atr_std + 1e-9)
+
+    def _argmax_finite(self, arr: Any) -> Optional[int]:
+        import numpy as np
+
+        finite = np.isfinite(arr)
+        if not finite.any():
+            return None
+        masked = np.where(finite, arr, -np.inf)
+        idx = int(np.argmax(masked))
+        if not np.isfinite(masked[idx]):
+            return None
+        return idx
+
+    def _window_bounds(self, n: int, center_idx: int, window_len: int) -> Tuple[int, int]:
+        start = max(0, int(center_idx) - window_len // 2)
+        end = min(n, start + window_len)
+        start = max(0, end - window_len)
+        return start, end
+
+    def _get_attack_harness(self, spread_mult: float, slippage_mult: float) -> Any:
+        """
+        Build scenario harness with stressed execution costs.
+
+        If harness provides clone_with_costs(), use it. Otherwise clone EvalConfig.
+        """
+        if hasattr(self.harness, "clone_with_costs"):
+            return self.harness.clone_with_costs(spread_mult, slippage_mult)
+
+        base_cfg = getattr(self.harness, "config", None)
+        if not isinstance(base_cfg, EvalConfig):
+            return self.harness
+
+        cfg = copy.deepcopy(base_cfg)
+        cfg.spread_pips = float(cfg.spread_pips) * spread_mult
+        cfg.slippage_pips = float(cfg.slippage_pips) * slippage_mult
+        return EvaluationHarness(cfg)
+
+    def _drop_bars(self, data: List[Any], drop_every_n: int) -> List[Any]:
+        """Deterministic feed-dropout simulation."""
+        if drop_every_n <= 1:
+            return data
+        out = [bar for idx, bar in enumerate(data) if (idx + 1) % drop_every_n != 0]
+        return out if len(out) >= max(10, len(data) // 2) else data
+
+    def _inject_price_noise(self, data: List[Any], variant_id: str, sigma: float) -> List[Any]:
+        """Inject small deterministic perturbations to OHLC prices."""
+        if sigma <= 0:
+            return data
+
+        seed = int(hashlib.md5(variant_id.encode()).hexdigest()[:8], 16)
+        rng = random.Random(seed)
+        out: List[Any] = []
+
+        for bar in data:
+            if not self._has_price_fields(bar):
+                out.append(bar)
+                continue
+
+            o = self._get_field(bar, "open")
+            h = self._get_field(bar, "high")
+            l = self._get_field(bar, "low")
+            c = self._get_field(bar, "close")
+            if any(v is None for v in [o, h, l, c]):
+                out.append(bar)
+                continue
+
+            o_f = float(o)
+            h_f = float(h)
+            l_f = float(l)
+            c_f = float(c)
+            noise = rng.gauss(0.0, sigma)
+            c2 = c_f * (1.0 + noise)
+            o2 = o_f * (1.0 + 0.5 * noise)
+            h2 = max(h_f, o2, c2)
+            l2 = min(l_f, o2, c2)
+
+            out.append(self._clone_bar_with_prices(bar, o2, h2, l2, c2))
+
+        return out
+
+    def _has_price_fields(self, bar: Any) -> bool:
+        if isinstance(bar, dict):
+            return all(k in bar for k in ("open", "high", "low", "close"))
+        return all(hasattr(bar, k) for k in ("open", "high", "low", "close"))
+
+    def _get_field(self, bar: Any, field: str) -> Any:
+        if isinstance(bar, dict):
+            return bar.get(field)
+        return getattr(bar, field, None)
+
+    def _clone_bar_with_prices(self, bar: Any, o: float, h: float, l: float, c: float) -> Any:
+        if isinstance(bar, dict):
+            out = dict(bar)
+            out["open"] = float(o)
+            out["high"] = float(h)
+            out["low"] = float(l)
+            out["close"] = float(c)
+            return out
+        out = copy.copy(bar)
+        setattr(out, "open", float(o))
+        setattr(out, "high", float(h))
+        setattr(out, "low", float(l))
+        setattr(out, "close", float(c))
+        return out
+
+    def _record_failure(
+        self,
+        variant_id: str,
+        stage: str,
+        reason: str,
+        details: Dict[str, Any],
+    ) -> None:
+        """Append failure reason to immutable archive."""
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "round": self.round,
+            "variant_id": variant_id,
+            "stage": stage,
+            "reason": reason,
+            "details": self._sanitize_for_json(details),
+        }
+        with open(self.failure_archive_path, "a") as f:
+            f.write(json.dumps(record) + "\n")
+
+    def _sanitize_for_json(self, value: Any) -> Any:
+        """Convert NaN/Inf recursively to strict JSON-safe values."""
+        if isinstance(value, float):
+            return value if math.isfinite(value) else None
+        if isinstance(value, dict):
+            return {k: self._sanitize_for_json(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [self._sanitize_for_json(v) for v in value]
+        return value
+
+    def _build_exception_report(
+        self,
+        variant_id: str,
+        manifest_id: str,
+        error: str,
+    ) -> EvalReport:
+        """Create a fail-closed eval report when evaluator crashes."""
+        return EvalReport(
+            variant_id=variant_id,
+            manifest_id=manifest_id,
+            evaluated_at=datetime.now(timezone.utc).isoformat(),
+            folds=[],
+            aggregate_metrics={},
+            passed_all_gates=False,
+            gate_results={"evaluation_exception": False},
+            integrity_violations=[f"EVALUATION_EXCEPTION:{error}"],
+        )
+
+    def _evaluate_with_retries(
+        self,
+        harness: Any,
+        variant_config: EvolutionConfig,
+        data: List[Any],
+        manifest: RunManifest,
+        variant_id: str,
+        stage: str,
+        context: Optional[Dict[str, Any]] = None,
+    ) -> Tuple[Optional[EvalReport], Optional[str]]:
+        """Evaluate with bounded retries for transient failures."""
+        retries = max(0, int(self.config.eval_retry_attempts))
+        attempts = retries + 1
+        last_error: Optional[str] = None
+
+        for attempt in range(1, attempts + 1):
+            try:
+                report = harness.evaluate(variant_config, data, manifest, variant_id=variant_id)
+                if attempt > 1:
+                    self._record_failure(
+                        variant_id=variant_id,
+                        stage=stage,
+                        reason="RECOVERED_AFTER_RETRY",
+                        details={
+                            "attempt": attempt,
+                            "max_attempts": attempts,
+                            "context": context or {},
+                        },
+                    )
+                return report, None
+            except Exception as exc:
+                last_error = str(exc)
+                self._record_failure(
+                    variant_id=variant_id,
+                    stage=stage,
+                    reason="EVALUATION_EXCEPTION",
+                    details={
+                        "attempt": attempt,
+                        "max_attempts": attempts,
+                        "error": last_error,
+                        "context": context or {},
+                    },
+                )
+                if attempt < attempts:
+                    backoff = max(0.0, float(self.config.eval_retry_backoff_seconds)) * attempt
+                    self._write_watchdog(
+                        "EVAL_RETRY",
+                        {
+                            "variant_id": variant_id,
+                            "stage": stage,
+                            "attempt": attempt,
+                            "next_backoff_s": backoff,
+                        },
+                    )
+                    if backoff > 0:
+                        time.sleep(backoff)
+
+        return None, last_error
+
+    def _resume_state_if_available(self) -> bool:
+        """Recover archive/champion/live state from prior run artifacts."""
+        resumed = False
+
+        archive_path = self.output_dir / "ARCHIVE_INDEX.json"
+        if archive_path.exists():
+            try:
+                index = ArchiveIndex.load(archive_path)
+                self.archive.load_from_index(index)
+                resumed = True
+            except Exception as exc:
+                self._record_failure(
+                    variant_id="system",
+                    stage="RECOVERY",
+                    reason="ARCHIVE_LOAD_FAILED",
+                    details={"path": str(archive_path), "error": str(exc)},
+                )
+
+        live_path = self.output_dir / "LIVE_GATING_STATE.json"
+        if live_path.exists():
+            try:
+                self.live_state = LiveGatingState.load(live_path)
+                resumed = True
+            except Exception as exc:
+                self._record_failure(
+                    variant_id="system",
+                    stage="RECOVERY",
+                    reason="LIVE_STATE_LOAD_FAILED",
+                    details={"path": str(live_path), "error": str(exc)},
+                )
+
+        champion_path = self.output_dir / "CHAMPION_CONFIG.json"
+        if champion_path.exists():
+            try:
+                with open(champion_path, "r") as f:
+                    self.current_champion = EvolutionConfig.from_dict(json.load(f))
+                resumed = True
+            except Exception as exc:
+                self._record_failure(
+                    variant_id="system",
+                    stage="RECOVERY",
+                    reason="CHAMPION_LOAD_FAILED",
+                    details={"path": str(champion_path), "error": str(exc)},
+                )
+
+        top = self.archive.get_champions(1)
+        if top:
+            self.best_fitness = max(self.best_fitness, float(top[0].fitness))
+
+        if resumed:
+            self.round = int(self.archive.generation)
+            self._record_failure(
+                variant_id="system",
+                stage="RECOVERY",
+                reason="STATE_RESUMED",
+                details={
+                    "archive_generation": self.archive.generation,
+                    "total_evaluated": self.archive.total_evaluated,
+                    "has_live_state": self.live_state is not None,
+                    "has_champion": self.current_champion is not None,
+                },
+            )
+
+        return resumed
+
+    def _record_round_memory(self, round_result: Dict[str, Any], manifest_id: str) -> None:
+        """Append compact long-horizon memory for continuity across sessions."""
+        if not self.config.long_horizon_memory_enabled:
+            return
+
+        record = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "manifest_id": manifest_id,
+            "round": self.round,
+            "best_fitness_global": self._sanitize_for_json(self.best_fitness),
+            "archive_size": sum(len(b) for b in self.archive.buckets.values()),
+            "active_variant_id": self.live_state.active_variant_id if self.live_state else None,
+            "round_result": self._sanitize_for_json(round_result),
+        }
+        with open(self.round_memory_path, "a") as f:
+            f.write(json.dumps(record) + "\n")
+
+    def _check_for_stale_watchdog(self) -> None:
+        """Detect stale heartbeat from a previous interrupted run."""
+        if not self.config.watchdog_enabled or not self.watchdog_path.exists():
+            return
+        try:
+            payload = json.loads(self.watchdog_path.read_text())
+            ts_raw = str(payload.get("timestamp", ""))
+            ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - ts).total_seconds()
+            if age > max(1, int(self.config.watchdog_stale_seconds)):
+                self._record_failure(
+                    variant_id="system",
+                    stage="RECOVERY",
+                    reason="STALE_WATCHDOG_DETECTED",
+                    details={
+                        "age_seconds": age,
+                        "stale_after_seconds": self.config.watchdog_stale_seconds,
+                        "last_stage": payload.get("stage"),
+                    },
+                )
+        except Exception:
+            # Heartbeat parsing failure should not block a run.
+            return
+
+    def _write_watchdog(self, stage: str, metadata: Optional[Dict[str, Any]] = None) -> None:
+        """Emit heartbeat artifact for external supervisors/watchdogs."""
+        if not self.config.watchdog_enabled:
+            return
+        payload = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "pid": os.getpid(),
+            "round": self.round,
+            "stage": stage,
+            "stale_after_seconds": int(self.config.watchdog_stale_seconds),
+            "metadata": metadata or {},
+        }
+        with open(self.watchdog_path, "w") as f:
+            json.dump(payload, f, indent=2)
     
     def _generate_variants(self) -> List[Tuple[EvolutionConfig, VariantPatch]]:
         """Generate variant configs for this round."""

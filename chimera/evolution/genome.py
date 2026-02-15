@@ -44,6 +44,13 @@ class GenomeConfig:
     min_atr: tuple = (0.0001, 0.001)
     max_spread_atr_ratio: tuple = (0.1, 0.5)
     min_volume_ratio: tuple = (0.5, 2.0)
+    use_aether_gate: tuple = (0, 1)  # Boolean as int
+    aether_entropy_max: tuple = (0.25, 0.75)
+    aether_coherence_min: tuple = (0.10, 0.80)
+    aether_pc_min: tuple = (0.10, 0.80)
+    aether_force_min: tuple = (0.00, 0.60)
+    aether_block_on_seam: tuple = (0, 1)  # Boolean as int
+    aether_seam_force_override: tuple = (0.20, 1.00)
 
 
 @dataclass
@@ -84,6 +91,13 @@ class StrategyGenome:
     min_atr: float = 0.0003
     max_spread_atr_ratio: float = 0.3
     min_volume_ratio: float = 0.8
+    use_aether_gate: bool = True
+    aether_entropy_max: float = 0.65
+    aether_coherence_min: float = 0.20
+    aether_pc_min: float = 0.20
+    aether_force_min: float = 0.08
+    aether_block_on_seam: bool = True
+    aether_seam_force_override: float = 0.35
     
     # Regime affinity (which regimes this strategy prefers)
     trend_affinity: float = 0.5  # 0 = range, 1 = trend
@@ -172,6 +186,13 @@ def create_random_genome(config: Optional[GenomeConfig] = None) -> StrategyGenom
         min_atr=rand_range(cfg.min_atr),
         max_spread_atr_ratio=rand_range(cfg.max_spread_atr_ratio),
         min_volume_ratio=rand_range(cfg.min_volume_ratio),
+        use_aether_gate=rand_bool(cfg.use_aether_gate),
+        aether_entropy_max=rand_range(cfg.aether_entropy_max),
+        aether_coherence_min=rand_range(cfg.aether_coherence_min),
+        aether_pc_min=rand_range(cfg.aether_pc_min),
+        aether_force_min=rand_range(cfg.aether_force_min),
+        aether_block_on_seam=rand_bool(cfg.aether_block_on_seam),
+        aether_seam_force_override=rand_range(cfg.aether_seam_force_override),
         trend_affinity=random.random(),
         volatility_affinity=random.random()
     )
@@ -194,6 +215,13 @@ def create_default_genome() -> StrategyGenome:
         min_atr=0.0001,  # Lowered for synthetic data
         max_spread_atr_ratio=0.5,
         min_volume_ratio=0.5,  # Lowered for more trades
+        use_aether_gate=True,
+        aether_entropy_max=0.65,
+        aether_coherence_min=0.20,
+        aether_pc_min=0.20,
+        aether_force_min=0.08,
+        aether_block_on_seam=True,
+        aether_seam_force_override=0.35,
         trend_affinity=0.5,
         volatility_affinity=0.5
     )
