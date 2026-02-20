@@ -1,0 +1,413 @@
+// QUANT-OMEGA: Adaptive Regime + Ensemble Signal Strategy
+// Version: 1.0.0
+// Author: OMEGA-DEVIN System
+// License: MIT
+// 
+// This strategy implements the QUANT-OMEGA indicator logic for backtesting
+// with proper risk management, position sizing, and kill-switch rules.
+
+//@version=5
+strategy("QUANT-OMEGA Strategy", 
+     shorttitle="QUANT-OMEGA STR", 
+     overlay=true,
+     initial_capital=100000,
+     default_qty_type=strategy.percent_of_equity,
+     default_qty_value=100,
+     commission_type=strategy.commission.percent,
+     commission_value=0.05,
+     slippage=2,
+     pyramiding=0,
+     calc_on_every_tick=false,
+     process_orders_on_close=true)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+// General Settings
+i_nonRepaint = input.bool(true, "Non-Repainting Mode", group="General")
+
+// Regime Detection
+i_adxPeriod = input.int(14, "ADX Period", minval=5, maxval=50, group="Regime Detection")
+i_adxThreshold = input.int(25, "ADX Trend Threshold", minval=15, maxval=40, group="Regime Detection")
+i_atrPeriod = input.int(14, "ATR Period", minval=5, maxval=50, group="Regime Detection")
+i_atrSlowPeriod = input.int(50, "ATR Slow Period", minval=20, maxval=100, group="Regime Detection")
+
+// Trend Following
+i_emaFast = input.int(8, "EMA Fast", minval=3, maxval=20, group="Trend Following")
+i_emaSlow = input.int(21, "EMA Slow", minval=10, maxval=50, group="Trend Following")
+i_emaTrend = input.int(50, "EMA Trend", minval=20, maxval=200, group="Trend Following")
+
+// Mean Reversion
+i_bbPeriod = input.int(20, "Bollinger Period", minval=10, maxval=50, group="Mean Reversion")
+i_bbStd = input.float(2.0, "Bollinger StdDev", minval=1.0, maxval=3.0, step=0.1, group="Mean Reversion")
+i_rsiPeriod = input.int(14, "RSI Period", minval=5, maxval=30, group="Mean Reversion")
+
+// Breakout
+i_donchianPeriod = input.int(20, "Donchian Period", minval=10, maxval=50, group="Breakout")
+i_squeezeKcMult = input.float(1.5, "Keltner Multiplier", minval=1.0, maxval=2.5, step=0.1, group="Breakout")
+
+// Confidence Thresholds
+i_confNoTrade = input.int(30, "No Trade Threshold", minval=0, maxval=50, group="Confidence")
+i_confWatch = input.int(50, "Watch Only Threshold", minval=30, maxval=70, group="Confidence")
+i_confSmall = input.int(70, "Small Entry Threshold", minval=50, maxval=85, group="Confidence")
+i_confStrong = input.int(85, "Strong Entry Threshold", minval=70, maxval=100, group="Confidence")
+
+// Risk Management
+i_riskPerTrade = input.float(1.0, "Risk Per Trade %", minval=0.1, maxval=5.0, step=0.1, group="Risk Management")
+i_maxDrawdown = input.float(15.0, "Max Drawdown %", minval=5.0, maxval=30.0, step=1.0, group="Risk Management")
+i_dailyLossLimit = input.float(3.0, "Daily Loss Limit %", minval=1.0, maxval=10.0, step=0.5, group="Risk Management")
+i_maxLeverage = input.float(5.0, "Max Leverage", minval=1.0, maxval=20.0, step=0.5, group="Risk Management")
+i_stopMultiplier = input.float(2.0, "Stop Loss ATR Multiplier", minval=1.0, maxval=5.0, step=0.5, group="Risk Management")
+i_tpMultiplier = input.float(3.0, "Take Profit ATR Multiplier", minval=1.0, maxval=10.0, step=0.5, group="Risk Management")
+
+// Session Filter
+i_useSessionFilter = input.bool(false, "Use Session Filter", group="Session")
+i_sessionStart = input.int(8, "Session Start Hour (UTC)", minval=0, maxval=23, group="Session")
+i_sessionEnd = input.int(20, "Session End Hour (UTC)", minval=0, maxval=23, group="Session")
+
+// Max Trades
+i_maxTradesPerDay = input.int(5, "Max Trades Per Day", minval=1, maxval=20, group="Risk Management")
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+confirmed(src) => i_nonRepaint ? src[1] : src
+
+tr_custom() => math.max(high - low, math.abs(high - close[1]), math.abs(low - close[1]))
+
+atr_custom(length) =>
+    ta.rma(tr_custom(), length)
+
+adx_custom(length) =>
+    up = ta.change(high)
+    down = -ta.change(low)
+    plusDM = na(up) ? na : (up > down and up > 0 ? up : 0)
+    minusDM = na(down) ? na : (down > up and down > 0 ? down : 0)
+    trueRange = tr_custom()
+    plusDI = 100 * ta.rma(plusDM, length) / ta.rma(trueRange, length)
+    minusDI = 100 * ta.rma(minusDM, length) / ta.rma(trueRange, length)
+    dx = 100 * math.abs(plusDI - minusDI) / (plusDI + minusDI)
+    adx = ta.rma(dx, length)
+    [adx, plusDI, minusDI]
+
+stoch_custom(length, smoothK, smoothD) =>
+    k = ta.sma(ta.stoch(close, high, low, length), smoothK)
+    d = ta.sma(k, smoothD)
+    [k, d]
+
+// ============================================================================
+// REGIME DETECTION
+// ============================================================================
+
+[adx, diPlus, diMinus] = adx_custom(i_adxPeriod)
+adx_conf = confirmed(adx)
+diPlus_conf = confirmed(diPlus)
+diMinus_conf = confirmed(diMinus)
+
+trendStrength = adx_conf > i_adxThreshold ? "TRENDING" : 
+                adx_conf > i_adxThreshold - 5 ? "WEAK_TREND" : "RANGING"
+
+trendDirection = diPlus_conf > diMinus_conf ? 1 : -1
+
+atrFast = atr_custom(i_atrPeriod)
+atrSlow = atr_custom(i_atrSlowPeriod)
+atrRatio = confirmed(atrFast) / confirmed(atrSlow)
+
+volRegime = atrRatio > 1.2 ? "HIGH_VOL" : 
+            atrRatio < 0.8 ? "LOW_VOL" : "NORMAL_VOL"
+
+volExpanding = atrRatio > 1.2 and confirmed(atrFast) > confirmed(atrFast[5])
+
+rsi = ta.rsi(close, i_rsiPeriod)
+rsi_conf = confirmed(rsi)
+
+[stochK, stochD] = stoch_custom(14, 3, 3)
+stochK_conf = confirmed(stochK)
+
+momentumExhaustion = (rsi_conf > 70 and rsi_conf < confirmed(rsi[3])) or 
+                     (rsi_conf < 30 and rsi_conf > confirmed(rsi[3]))
+
+bbBasis = ta.sma(close, i_bbPeriod)
+bbDev = i_bbStd * ta.stdev(close, i_bbPeriod)
+bbUpper = bbBasis + bbDev
+bbLower = bbBasis - bbDev
+
+kcBasis = ta.ema(close, i_bbPeriod)
+kcRange = i_squeezeKcMult * atr_custom(i_bbPeriod)
+kcUpper = kcBasis + kcRange
+kcLower = kcBasis - kcRange
+
+squeezeOn = confirmed(bbLower) > confirmed(kcLower) and confirmed(bbUpper) < confirmed(kcUpper)
+squeezeMomentum = confirmed(close) - (ta.highest(high, i_bbPeriod) + ta.lowest(low, i_bbPeriod)) / 2
+
+regime = squeezeOn ? "SQUEEZE" :
+         trendStrength == "TRENDING" ? "TRENDING" :
+         volExpanding ? "BREAKOUT" : "RANGING"
+
+// ============================================================================
+// ALPHA FAMILIES
+// ============================================================================
+
+emaFast = ta.ema(close, i_emaFast)
+emaSlow = ta.ema(close, i_emaSlow)
+emaTrend = ta.ema(close, i_emaTrend)
+
+emaFast_conf = confirmed(emaFast)
+emaSlow_conf = confirmed(emaSlow)
+emaTrend_conf = confirmed(emaTrend)
+close_conf = confirmed(close)
+atr_conf = confirmed(atrFast)
+
+pullbackToEma = math.abs(close_conf - emaFast_conf) < 0.5 * atr_conf
+
+// Trend Following
+longTrendSignal = emaFast_conf > emaSlow_conf and
+                  close_conf > emaTrend_conf and
+                  adx_conf > i_adxThreshold and
+                  pullbackToEma and
+                  rsi_conf > 40 and rsi_conf < 70
+
+shortTrendSignal = emaFast_conf < emaSlow_conf and
+                   close_conf < emaTrend_conf and
+                   adx_conf > i_adxThreshold and
+                   pullbackToEma and
+                   rsi_conf < 60 and rsi_conf > 30
+
+// Mean Reversion
+bbUpper_conf = confirmed(bbUpper)
+bbLower_conf = confirmed(bbLower)
+bbBasis_conf = confirmed(bbBasis)
+
+volSma = ta.sma(volume, 20)
+volAboveAvg = confirmed(volume) > confirmed(volSma)
+
+emaTrendSlope = (emaTrend_conf - confirmed(emaTrend[10])) / confirmed(emaTrend[10])
+
+longReversionSignal = close_conf < bbLower_conf and
+                      adx_conf < i_adxThreshold and
+                      rsi_conf < 30 and
+                      volAboveAvg and
+                      emaTrendSlope > -0.001
+
+shortReversionSignal = close_conf > bbUpper_conf and
+                       adx_conf < i_adxThreshold and
+                       rsi_conf > 70 and
+                       volAboveAvg and
+                       emaTrendSlope < 0.001
+
+// Breakout
+donchianHigh = ta.highest(high, i_donchianPeriod)
+donchianLow = ta.lowest(low, i_donchianPeriod)
+
+donchianHigh_conf = confirmed(donchianHigh[1])
+donchianLow_conf = confirmed(donchianLow[1])
+
+volSpike = confirmed(volume) > 1.5 * confirmed(volSma)
+
+longBreakoutSignal = close_conf > donchianHigh_conf and
+                     not squeezeOn and
+                     confirmed(squeezeMomentum) > 0 and
+                     volSpike and
+                     atrRatio > 1.0
+
+shortBreakoutSignal = close_conf < donchianLow_conf and
+                      not squeezeOn and
+                      confirmed(squeezeMomentum) < 0 and
+                      volSpike and
+                      atrRatio > 1.0
+
+// ============================================================================
+// CONFIDENCE CALCULATION
+// ============================================================================
+
+calcConfidence() =>
+    score = 0.0
+    
+    if regime == "TRENDING" and (longTrendSignal or shortTrendSignal)
+        score += 30
+    else if regime == "RANGING" and (longReversionSignal or shortReversionSignal)
+        score += 30
+    else if regime == "BREAKOUT" and (longBreakoutSignal or shortBreakoutSignal)
+        score += 30
+    else if longTrendSignal or shortTrendSignal or longReversionSignal or shortReversionSignal or longBreakoutSignal or shortBreakoutSignal
+        score += 10
+    
+    longSignals = (longTrendSignal ? 1 : 0) + (longReversionSignal ? 1 : 0) + (longBreakoutSignal ? 1 : 0)
+    shortSignals = (shortTrendSignal ? 1 : 0) + (shortReversionSignal ? 1 : 0) + (shortBreakoutSignal ? 1 : 0)
+    signalCount = math.max(longSignals, shortSignals)
+    
+    if signalCount >= 2
+        score += 30
+    else if signalCount == 1
+        score += 15
+    
+    if confirmed(volume) > confirmed(volSma) * 1.2
+        score += 15
+    else if confirmed(volume) > confirmed(volSma)
+        score += 10
+    
+    if not momentumExhaustion
+        score += 15
+    
+    if volRegime != "LOW_VOL"
+        score += 10
+    
+    math.min(100, score)
+
+confidence = calcConfidence()
+
+noTradeConditions = adx_conf < 15 or
+                    atrRatio < 0.5 or
+                    confirmed(volume) < 0.5 * confirmed(volSma)
+
+finalConfidence = noTradeConditions ? 0 : confidence
+
+// ============================================================================
+// RISK MANAGEMENT
+// ============================================================================
+
+// Track daily P&L
+var float dailyPnL = 0.0
+var int lastTradeDay = 0
+var int tradesToday = 0
+
+currentDay = dayofmonth(time)
+if currentDay != lastTradeDay
+    dailyPnL := 0.0
+    tradesToday := 0
+    lastTradeDay := currentDay
+
+// Track drawdown
+var float peakEquity = strategy.initial_capital
+peakEquity := math.max(peakEquity, strategy.equity)
+currentDrawdown = (peakEquity - strategy.equity) / peakEquity * 100
+
+// Kill switch conditions
+dailyLossHit = dailyPnL <= -i_dailyLossLimit
+maxDrawdownHit = currentDrawdown >= i_maxDrawdown
+maxTradesHit = tradesToday >= i_maxTradesPerDay
+
+killSwitch = dailyLossHit or maxDrawdownHit or maxTradesHit
+
+// Session filter
+currentHour = hour(time, "UTC")
+inSession = not i_useSessionFilter or (currentHour >= i_sessionStart and currentHour < i_sessionEnd)
+
+// ============================================================================
+// POSITION SIZING
+// ============================================================================
+
+calcPositionSize(stopDistance) =>
+    riskPct = finalConfidence >= i_confStrong ? i_riskPerTrade * 1.5 :
+              finalConfidence >= i_confSmall ? i_riskPerTrade :
+              finalConfidence > i_confWatch ? i_riskPerTrade * 0.5 : 0
+    
+    riskAmount = strategy.equity * (riskPct / 100)
+    posSize = riskAmount / stopDistance
+    
+    notionalValue = posSize * close
+    impliedLeverage = notionalValue / strategy.equity
+    
+    if impliedLeverage > i_maxLeverage
+        posSize := (strategy.equity * i_maxLeverage) / close
+    
+    posSize
+
+// ============================================================================
+// ENTRY/EXIT LOGIC
+// ============================================================================
+
+longSignal = (longTrendSignal or longReversionSignal or longBreakoutSignal) and finalConfidence > i_confWatch
+shortSignal = (shortTrendSignal or shortReversionSignal or shortBreakoutSignal) and finalConfidence > i_confWatch
+
+longEntry = longSignal and not longSignal[1] and not killSwitch and inSession
+shortEntry = shortSignal and not shortSignal[1] and not killSwitch and inSession
+
+stopDistance = i_stopMultiplier * atr_conf
+tpDistance = i_tpMultiplier * atr_conf
+
+// Long entry
+if longEntry and strategy.position_size == 0
+    posSize = calcPositionSize(stopDistance)
+    if posSize > 0
+        strategy.entry("Long", strategy.long, qty=posSize)
+        strategy.exit("Long Exit", "Long", 
+                     stop=close - stopDistance, 
+                     limit=close + tpDistance)
+        tradesToday += 1
+
+// Short entry
+if shortEntry and strategy.position_size == 0
+    posSize = calcPositionSize(stopDistance)
+    if posSize > 0
+        strategy.entry("Short", strategy.short, qty=posSize)
+        strategy.exit("Short Exit", "Short", 
+                     stop=close + stopDistance, 
+                     limit=close - tpDistance)
+        tradesToday += 1
+
+// Signal-based exits
+if strategy.position_size > 0 and shortSignal
+    strategy.close("Long", comment="Signal Exit")
+
+if strategy.position_size < 0 and longSignal
+    strategy.close("Short", comment="Signal Exit")
+
+// Update daily P&L
+if strategy.closedtrades > 0
+    lastTradePnL = strategy.closedtrades.profit(strategy.closedtrades - 1)
+    dailyPnL += lastTradePnL / strategy.equity * 100
+
+// ============================================================================
+// VISUAL ELEMENTS
+// ============================================================================
+
+plot(emaFast, "EMA Fast", color=color.new(color.blue, 50), linewidth=1)
+plot(emaSlow, "EMA Slow", color=color.new(color.orange, 50), linewidth=1)
+plot(emaTrend, "EMA Trend", color=color.new(color.purple, 50), linewidth=2)
+
+bgcolor(finalConfidence <= i_confNoTrade ? color.new(color.gray, 90) : na)
+bgcolor(killSwitch ? color.new(color.red, 90) : na)
+
+plotshape(longEntry, title="Long Entry", location=location.belowbar, 
+          color=color.green, style=shape.triangleup, size=size.normal)
+plotshape(shortEntry, title="Short Entry", location=location.abovebar, 
+          color=color.red, style=shape.triangledown, size=size.normal)
+
+// ============================================================================
+// INFO TABLE
+// ============================================================================
+
+var table infoTable = table.new(position.top_right, 2, 8, bgcolor=color.new(color.black, 80))
+
+if barstate.islast
+    table.cell(infoTable, 0, 0, "QUANT-OMEGA", text_color=color.white, text_size=size.small)
+    table.cell(infoTable, 1, 0, "v1.0.0", text_color=color.gray, text_size=size.small)
+    
+    table.cell(infoTable, 0, 1, "Regime", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 1, regime, text_color=color.white, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 2, "Confidence", text_color=color.gray, text_size=size.tiny)
+    confColor = finalConfidence >= i_confStrong ? color.green :
+                finalConfidence >= i_confSmall ? color.lime :
+                finalConfidence > i_confWatch ? color.yellow : color.red
+    table.cell(infoTable, 1, 2, str.tostring(math.round(finalConfidence)) + "%", text_color=confColor, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 3, "Drawdown", text_color=color.gray, text_size=size.tiny)
+    ddColor = currentDrawdown < 5 ? color.green : currentDrawdown < 10 ? color.yellow : color.red
+    table.cell(infoTable, 1, 3, str.tostring(math.round(currentDrawdown, 1)) + "%", text_color=ddColor, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 4, "Daily P&L", text_color=color.gray, text_size=size.tiny)
+    pnlColor = dailyPnL >= 0 ? color.green : color.red
+    table.cell(infoTable, 1, 4, str.tostring(math.round(dailyPnL, 2)) + "%", text_color=pnlColor, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 5, "Trades Today", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 5, str.tostring(tradesToday) + "/" + str.tostring(i_maxTradesPerDay), text_color=color.white, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 6, "Kill Switch", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 6, killSwitch ? "ACTIVE" : "OFF", text_color=killSwitch ? color.red : color.green, text_size=size.tiny)
+    
+    table.cell(infoTable, 0, 7, "Session", text_color=color.gray, text_size=size.tiny)
+    table.cell(infoTable, 1, 7, inSession ? "ACTIVE" : "CLOSED", text_color=inSession ? color.green : color.gray, text_size=size.tiny)
