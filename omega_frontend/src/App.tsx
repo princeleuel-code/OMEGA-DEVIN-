@@ -1,2893 +1,841 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { 
-  Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area, ReferenceLine, Cell, BarChart, RadialBarChart, RadialBar
-} from 'recharts';
-import { 
-  TrendingUp, TrendingDown, Activity, DollarSign, Target, 
-  AlertTriangle, Zap, BarChart3, ArrowUpRight, ArrowDownRight, 
-  Clock, Layers, Brain, Volume2, Gauge, Eye, Shield, Crosshair,
-  ChevronUp, ChevronDown, Cpu, Network, Sparkles, Award
-} from 'lucide-react';
+import { useMemo, useState, type ReactNode } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+type TerminalMode = 'capsule' | 'command';
+type ComprehensionMode = 'beginner' | 'expert';
+type AutonomyMode = 'manual' | 'paper';
+type VerdictLabel = 'EXECUTE' | 'WAIT' | 'EXPLICIT_ABSTAIN' | 'HARD_LOCK';
+type Direction = 'LONG' | 'SHORT' | 'NEUTRAL';
+type TrappedSide = 'BUYERS' | 'SELLERS' | 'NONE';
+type RiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+type AgentBias = 'BULLISH' | 'BEARISH' | 'NEUTRAL';
+type Tone = 'cyan' | 'green' | 'gold' | 'red' | 'neutral';
 
-type UnknownRecord = Record<string, unknown>;
+interface PriceLevel {
+  price: number;
+  bidVolume: number;
+  askVolume: number;
+  imbalance: number;
+  absorption: number;
+}
 
-interface Candle {
+interface InternalProfileLevel {
+  price: number;
+  volume: number;
+  side: 'buy' | 'sell' | 'neutral';
+}
+
+interface RejectionEdge {
+  side: 'upper' | 'lower';
+  strength: number;
+  price: number;
+}
+
+interface AcceptanceCore {
+  low: number;
+  high: number;
+  strength: number;
+}
+
+interface CandleTruthPacket {
+  id: string;
   timestamp: string;
+  symbol: string;
+  timeframe: string;
   open: number;
   high: number;
   low: number;
   close: number;
-  volume?: number;
-  [k: string]: unknown;
-}
-
-interface VwapPoint {
-  timestamp: string;
-  vwap: number;
-  upper_band_1: number;
-  lower_band_1: number;
-  upper_band_2?: number;
-  lower_band_2?: number;
-  [k: string]: unknown;
-}
-
-interface DeltaPoint {
-  idx: number;
-  delta: number;
-  cumulative_delta: number;
-  is_bullish: boolean;
-  timestamp?: string;
-  [k: string]: unknown;
-}
-
-interface LiquiditySweep {
-  type: string;
-  signal?: string;
-  sweep_price?: number;
-  price?: number;
-  [k: string]: unknown;
-}
-
-interface SwingPoint {
-  price: number;
-  timestamp?: string;
-  type?: string;
-  [k: string]: unknown;
-}
-
-interface BosSignal {
-  type: string;
-  broken_level?: number;
-  current_price?: number;
-  [k: string]: unknown;
-}
-
-interface ClosedTrade {
-  symbol: string;
-  side: 'LONG' | 'SHORT' | string;
-  entry?: number;
-  exit?: number;
-  pnl: number;
-  exit_reason?: string;
-  [k: string]: unknown;
-}
-
-interface UnifiedSignal {
-  name: 'VP' | 'Delta' | 'OFI' | 'Struct';
-  bias: 'BULL' | 'BEAR' | 'NEUT';
-}
-
-interface UnifiedDecision {
-  decision: string;
-  confidence: number;
-  signals: UnifiedSignal[];
-}
-
-interface EvidencePin {
-  pin_id: string;
-  pin_type: string;
-  bar_indices: number[];
-  feature_name: string;
-  description: string;
-  severity: number;
-  zone?: { price_low: number; price_high: number } | null;
-}
-
-interface ResolutionCondition {
-  condition: string;
-  type: string;
-  anchors: UnknownRecord[];
-}
-
-interface WeavePacket {
-  packet_id: string;
-  timestamp: string;
-  symbol: string;
-  timeframe: string;
-  bar_index: number;
-  decision: string;
-  confidence: number;
-  reason_codes: string[];
-  reason_text: string;
-  evidence_pins: EvidencePin[];
-  conflict_map: UnknownRecord[];
-  resolution_conditions: ResolutionCondition[];
-  features: Record<string, UnknownRecord>;
-}
-
-interface DomProviderHealth {
-  symbol: string;
-  provider: string;
-  state: string;
-  is_real: boolean;
-  snapshots_received: number;
-  consecutive_valid_snapshots: number;
-  warmup_required: number;
-  last_snapshot_ts: string | null;
-  last_snapshot_age_sec: number | null;
-  stale_threshold_sec: number;
-  last_error: string | null;
-}
-
-interface ProvenanceStatus {
-  real_dom_required: boolean;
-  dom_status?: {
-    real_dom_required: boolean;
-    providers: Record<string, DomProviderHealth>;
-  };
-}
-
-interface VpBar {
-  y: number;
-  height: number;
-  totalWidth: number;
-  buyWidth: number;
-  sellWidth: number;
-  neutralWidth: number;
-  isPOC: boolean;
-  isValueArea: boolean;
-  isHVN: boolean;
-  price: number;
-  delta: number;
-}
-
-interface VolumeLevel {
-  price_low: number;
-  price_high: number;
-  price_mid: number;
   volume: number;
-  volume_pct: number;
-  buy_volume: number;
-  sell_volume: number;
+  bidVolume: number;
+  askVolume: number;
   delta: number;
-  is_value_area: boolean;
-  is_hvn: boolean;
-  is_lvn: boolean;
-}
-
-interface VolumeProfile {
-  levels: VolumeLevel[];
+  cumulativeDelta: number;
+  internalProfile: InternalProfileLevel[];
+  priceLevels: PriceLevel[];
   poc: number;
   vah: number;
   val: number;
-  price_high: number;
-  price_low: number;
-  total_volume: number;
-  hvn_prices: number[];
-  lvn_prices: number[];
+  acceptanceCore: AcceptanceCore;
+  deltaSpine: number[];
+  absorptionNodes: PriceLevel[];
+  imbalanceLadder: PriceLevel[];
+  liquiditySweepHigh: boolean;
+  liquiditySweepLow: boolean;
+  fairValueGap: boolean;
+  structuralVoid: boolean;
+  trappedSide: TrappedSide;
+  rejectionEdges: RejectionEdge[];
+  toxicity: number;
+  trustScore: number;
+  continuationProbability: number;
+  reversalProbability: number;
+  manipulationRisk: number;
+  beginnerExplanation: string;
+  expertExplanation: string;
+  verdict: VerdictLabel;
 }
 
-interface OrderFlowImbalance {
-  ofi: number;
-  ofi_normalized: number;
-  signal: string;
-  strength: number;
-  lookback: number;
-}
-
-interface FootprintAnalysis {
-  imbalances: UnknownRecord[];
-  absorption_zones: UnknownRecord[];
-  exhaustion_signals: UnknownRecord[];
-}
-
-interface MarketStructure {
-  structure: string;
-  trend: string;
-  swing_highs: SwingPoint[];
-  swing_lows: SwingPoint[];
-  bos_signals: BosSignal[];
-  choch_signals: BosSignal[];
-}
-
-interface RiskMetrics {
-  var_95: number;
-  var_99: number;
-  expected_shortfall: number;
-  volatility: number;
-  sharpe_estimate: number;
-  max_drawdown: number;
-}
-
-interface InstitutionalLevel {
-  price: number;
-  type: string;
-  strength: number;
-  description: string;
-}
-
-interface ChartData {
-  candles: Candle[];
-  volume_profile: VolumeProfile | null;
-  vwap: VwapPoint[];
-  delta: DeltaPoint[];
-  current_price: number;
-  order_flow_imbalance: OrderFlowImbalance | null;
-  footprint: FootprintAnalysis | null;
-  liquidity_sweeps: LiquiditySweep[];
-  market_structure: MarketStructure | null;
-  institutional_levels: { levels: InstitutionalLevel[], zones: UnknownRecord[] } | null;
-  risk_metrics: RiskMetrics | null;
-}
-
-interface TradingState {
-  capital: number;
-  equity: number;
-  total_pnl: number;
-  total_pnl_pct: number;
-  daily_pnl: number;
+interface MarketState {
+  symbol: string;
+  timeframe: string;
+  session: string;
+  candles: CandleTruthPacket[];
   regime: string;
-  confluence_score: number;
-  kill_switch_active: boolean;
-  open_positions: UnknownRecord[];
-  closed_trades: ClosedTrade[];
+  higherTimeframeTrend: string;
+  activePlaybook: string;
+  eventRisk: RiskLevel;
+  dataLatencyMs: number;
+  replaySync: number;
+  truthSync: number;
+  systemHealth: number;
 }
 
-interface Performance {
-  total_trades: number;
-  winning_trades: number;
-  losing_trades: number;
-  win_rate: number;
-  profit_factor: number;
-  total_pnl: number;
-  avg_trade: number;
-  best_trade: number;
-  worst_trade: number;
+interface AgentAnalysis {
+  agentName: string;
+  confidence: number;
+  evidence: string[];
+  bias: AgentBias;
+  recommendation: string;
+  riskFlag: boolean;
+  disagreementFlag: boolean;
+  lastUpdated: string;
+  canInfluenceExecution: boolean;
 }
 
-const SignalGauge = ({ value, label, signal }: { value: number, label: string, signal: string }) => {
-  const getColor = () => {
-    if (signal.includes('BUY') || signal.includes('BULLISH')) return '#10b981';
-    if (signal.includes('SELL') || signal.includes('BEARISH')) return '#ef4444';
-    return '#64748b';
-  };
+interface VerdictDecision {
+  verdict: VerdictLabel;
+  direction: Direction;
+  confidence: number;
+  reason: string;
+  beginnerReason: string;
+  expertReason: string;
+  requiredConfirmation: string;
+  invalidation: number;
+  targets: number[];
+  maxRisk: number;
+  executionStyle: string;
+  hardLockReasons: string[];
+  expectedEdge: number;
+  volatilityCost: number;
+  spreadCost: number;
+  slippageCost: number;
+  marketImpact: number;
+  liquidityRisk: number;
+  driftDistrust: number;
+  modelDisagreement: number;
+  replaySimilarity: number;
+  robustLowerBound: number;
+  riskReward: number;
+}
 
-  const data = [{ value: Math.abs(value) * 100, fill: getColor() }];
+interface LedgerEvent {
+  eventId: string;
+  candleId: string;
+  timestamp: string;
+  dataChecksum: string;
+  modelVersion: string;
+  ruleVersion: string;
+  evidenceUsed: string[];
+  agentVotes: string[];
+  confidenceBeforeDecision: number;
+  verdict: VerdictLabel;
+  outcomeAfterNCandles: string;
+  promotedStatus: 'promoted' | 'held' | 'rejected';
+  replayHash: string;
+  humanOverride: string;
+  riskGovernorStatus: string;
+}
 
-  return (
-    <div className="flex flex-col items-center">
-      <div className="w-24 h-24">
-        <ResponsiveContainer width="100%" height="100%">
-          <RadialBarChart cx="50%" cy="50%" innerRadius="60%" outerRadius="100%" data={data} startAngle={180} endAngle={0}>
-            <RadialBar background dataKey="value" cornerRadius={10} />
-          </RadialBarChart>
-        </ResponsiveContainer>
-      </div>
-      <div className="text-center -mt-4">
-        <div className={`text-lg font-bold ${signal.includes('BUY') ? 'text-emerald-400' : signal.includes('SELL') ? 'text-red-400' : 'text-slate-400'}`}>
-          {signal}
-        </div>
-        <div className="text-xs text-slate-500">{label}</div>
-      </div>
-    </div>
-  );
-};
+interface ManipulationAssessment {
+  level: RiskLevel;
+  score: number;
+  evidence: string[];
+  recommendedAction: 'trade allowed' | 'reduce size' | 'wait' | 'hard abstain';
+}
 
-const RiskCard = ({ label, value, unit, isNegative }: { label: string, value: number, unit: string, isNegative?: boolean }) => {
-  const displayValue = isNegative ? value : Math.abs(value);
-  const color = value < 0 ? 'text-red-400' : value > 0 ? 'text-emerald-400' : 'text-slate-400';
-  
-  return (
-    <div className="bg-slate-800/50 rounded-lg p-3 border border-slate-700/50">
-      <div className="text-xs text-slate-500 mb-1">{label}</div>
-      <div className={`text-lg font-mono font-bold ${color}`}>
-        {displayValue.toFixed(2)}{unit}
-      </div>
-    </div>
-  );
-};
+interface RiskState {
+  dailyMaxLossHit: boolean;
+  spreadTooWide: boolean;
+  liquidityInsufficient: boolean;
+  eventRiskHigh: boolean;
+  staleData: boolean;
+  modelDisagreementHigh: boolean;
+  manipulationRiskHigh: boolean;
+  robustLowerBoundNegative: boolean;
+  replaySimilarityWeak: boolean;
+  hardLockActive: boolean;
+  locks: string[];
+}
 
-const LevelRow = ({ level, decimals }: { level: InstitutionalLevel, decimals: number }) => {
-  const getTypeColor = (type: string) => {
-    switch (type) {
-      case 'POC': return 'bg-yellow-500';
-      case 'VAH': case 'VAL': return 'bg-cyan-500';
-      case 'HVN': return 'bg-emerald-500';
-      case 'LVN': return 'bg-orange-500';
-      default: return 'bg-slate-500';
-    }
-  };
+interface Scenario {
+  name: string;
+  probability: number;
+  path: string;
+  cancellation: string;
+}
 
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-slate-700/30 hover:bg-slate-800/30 transition-colors">
-      <div className="flex items-center gap-2">
-        <div className={`w-2 h-2 rounded-full ${getTypeColor(level.type)}`} />
-        <span className="text-xs font-medium text-slate-300">{level.type}</span>
-      </div>
-      <div className="text-sm font-mono text-white">{level.price.toFixed(decimals)}</div>
-      <div className="w-16">
-        <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-          <div 
-            className={`h-full ${getTypeColor(level.type)} rounded-full`}
-            style={{ width: `${level.strength * 100}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  );
-};
+interface BrittlePoint {
+  name: string;
+  whyItBreaks: string;
+  technicalFix: string;
+}
 
-const FootprintSignal = ({ type, count }: { type: string, count: number }) => {
-  const getIcon = () => {
-    switch (type) {
-      case 'imbalances': return <Layers className="w-4 h-4" />;
-      case 'absorption': return <Shield className="w-4 h-4" />;
-      case 'exhaustion': return <AlertTriangle className="w-4 h-4" />;
-      default: return <Activity className="w-4 h-4" />;
-    }
-  };
+const clamp = (value: number, min = 0, max = 1) => Math.max(min, Math.min(max, value));
+const fmt = (value: number, digits = 2) => value.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
+const pct = (value: number) => `${Math.round(value * 100)}%`;
 
-  const getColor = () => {
-    if (count === 0) return 'text-slate-500 border-slate-700';
-    if (type === 'imbalances') return 'text-purple-400 border-purple-500/50 bg-purple-500/10';
-    if (type === 'absorption') return 'text-cyan-400 border-cyan-500/50 bg-cyan-500/10';
-    return 'text-amber-400 border-amber-500/50 bg-amber-500/10';
-  };
-
-  return (
-    <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${getColor()}`}>
-      {getIcon()}
-      <span className="text-xs font-medium capitalize">{type}</span>
-      <span className="ml-auto text-sm font-bold">{count}</span>
-    </div>
-  );
-};
-
-const VolumeProfileChart = ({ data, currentPrice, symbol }: { data: VolumeProfile | null, currentPrice: number, symbol: string }) => {
-  if (!data || !data.levels || data.levels.length === 0) {
-    return (
-      <div className="h-full flex items-center justify-center text-slate-500">
-        <Activity className="w-6 h-6 animate-pulse mr-2" />
-        Loading Volume Profile...
-      </div>
-    );
+const hashText = (input: string): string => {
+  let hash = 0;
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash * 31 + input.charCodeAt(index)) >>> 0;
   }
-
-  const decimals = symbol === 'XAUUSD' ? 2 : symbol === 'USDJPY' ? 3 : 5;
-  const maxVolume = Math.max(...data.levels.map(l => l.volume_pct));
-
-  return (
-    <div className="h-full flex">
-      <div className="w-16 flex flex-col justify-between text-xs text-slate-400 pr-2">
-        <span>{data.price_high.toFixed(decimals)}</span>
-        <span className="text-cyan-400 font-bold">{data.vah.toFixed(decimals)}</span>
-        <span className="text-yellow-400 font-bold">{data.poc.toFixed(decimals)}</span>
-        <span className="text-cyan-400 font-bold">{data.val.toFixed(decimals)}</span>
-        <span>{data.price_low.toFixed(decimals)}</span>
-      </div>
-      
-      <div className="flex-1 flex flex-col-reverse relative">
-        {currentPrice > 0 && (
-          <div 
-            className="absolute w-full h-0.5 bg-white z-10 shadow-lg shadow-white/20"
-            style={{
-              bottom: `${((currentPrice - data.price_low) / (data.price_high - data.price_low)) * 100}%`
-            }}
-          >
-            <span className="absolute right-0 -top-3 text-xs bg-white text-black px-1.5 py-0.5 rounded font-mono font-bold">
-              {currentPrice.toFixed(decimals)}
-            </span>
-          </div>
-        )}
-        
-        <div 
-          className="absolute w-full h-px bg-cyan-500/50 z-5"
-          style={{ bottom: `${((data.vah - data.price_low) / (data.price_high - data.price_low)) * 100}%` }}
-        />
-        <div 
-          className="absolute w-full h-px bg-cyan-500/50 z-5"
-          style={{ bottom: `${((data.val - data.price_low) / (data.price_high - data.price_low)) * 100}%` }}
-        />
-        <div 
-          className="absolute w-full h-0.5 bg-yellow-500 z-5"
-          style={{ bottom: `${((data.poc - data.price_low) / (data.price_high - data.price_low)) * 100}%` }}
-        />
-        
-        {data.levels.map((level, idx) => {
-          const width = (level.volume_pct / maxVolume) * 100;
-          const isDelta = level.delta > 0;
-          
-          return (
-            <div 
-              key={idx} 
-              className="flex-1 flex items-center group relative"
-              title={`Price: ${level.price_mid.toFixed(decimals)} | Vol: ${level.volume.toFixed(0)} | Delta: ${level.delta.toFixed(0)}`}
-            >
-              {level.is_value_area && (
-                <div className="absolute inset-0 bg-cyan-500/10" />
-              )}
-              
-              <div 
-                className={`h-full transition-all duration-200 ${
-                  level.is_hvn 
-                    ? isDelta ? 'bg-emerald-500' : 'bg-red-500'
-                    : level.is_value_area 
-                      ? isDelta ? 'bg-emerald-500/70' : 'bg-red-500/70'
-                      : isDelta ? 'bg-emerald-500/40' : 'bg-red-500/40'
-                }`}
-                style={{ width: `${width}%` }}
-              />
-              
-              <div className="absolute left-full ml-2 hidden group-hover:block bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-xs z-20 whitespace-nowrap shadow-xl">
-                <div className="font-bold mb-1">Price: {level.price_mid.toFixed(decimals)}</div>
-                <div className="text-emerald-400">Buy Vol: {level.buy_volume.toFixed(0)}</div>
-                <div className="text-red-400">Sell Vol: {level.sell_volume.toFixed(0)}</div>
-                <div className={`font-bold ${isDelta ? 'text-emerald-400' : 'text-red-400'}`}>
-                  Delta: {level.delta > 0 ? '+' : ''}{level.delta.toFixed(0)}
-                </div>
-                {level.is_hvn && <div className="text-yellow-400 mt-1">High Volume Node</div>}
-                {level.is_lvn && <div className="text-orange-400 mt-1">Low Volume Node</div>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
+  return hash.toString(16).padStart(8, '0').slice(0, 8).toUpperCase();
 };
 
-// UNPUSHABLE BREAKTHROUGH: DeepCharts-style integrated chart with Volume Profile, Confidence Zones, Entry/Exit Markers
-const CandlestickChart = ({ candles, vwap, symbol, volumeProfile, liquiditySweeps, marketStructure, unifiedDecision, tradeSetup, highlightedBars, highlightZone, highlightColor }: {
-  candles: Candle[], 
-  vwap: VwapPoint[], 
-  symbol: string,
-  volumeProfile?: VolumeProfile | null,
-  liquiditySweeps?: LiquiditySweep[],
-  marketStructure?: MarketStructure | null,
-  unifiedDecision?: UnifiedDecision | null,
-  tradeSetup?: { direction: string, confidence: number, entry: number, stopLoss: number, target1: number, target2: number, riskReward1: number, isHighProbability: boolean } | null,
-  delta?: DeltaPoint[],
-  highlightedBars?: number[],
-  highlightZone?: { price_low: number; price_high: number } | null,
-  highlightColor?: string
-}) => {
-  const decimals = symbol === 'XAUUSD' ? 2 : symbol === 'USDJPY' ? 3 : 5;
-  
-  const chartData = useMemo(() => {
-    return candles.map((c, i) => ({
-      ...c,
-      idx: i,
-      vwap: vwap[i]?.vwap,
-      upper_band: vwap[i]?.upper_band_1,
-      lower_band: vwap[i]?.lower_band_1,
-      isBullish: c.close >= c.open,
-    }));
-  }, [candles, vwap]);
+const classForVerdict = (verdict: VerdictLabel) => {
+  if (verdict === 'EXECUTE') return 'state-positive';
+  if (verdict === 'WAIT') return 'state-wait';
+  if (verdict === 'EXPLICIT_ABSTAIN') return 'state-danger';
+  return 'state-lock';
+};
 
-  // Calculate all derived values using useMemo to ensure hooks are called consistently
-  const chartCalculations = useMemo(() => {
-    if (chartData.length === 0) {
-      return null;
-    }
-    
-    const allPrices = chartData.flatMap(c => [c.high, c.low]);
-    const priceHigh = Math.max(...allPrices);
-    const priceLow = Math.min(...allPrices);
-    const priceRange = priceHigh - priceLow;
-    const padding = priceRange * 0.05;
-    const adjustedHigh = priceHigh + padding;
-    const adjustedLow = priceLow - padding;
-    const adjustedRange = adjustedHigh - adjustedLow;
+const classForRisk = (level: RiskLevel) => {
+  if (level === 'LOW') return 'state-positive';
+  if (level === 'MEDIUM') return 'state-wait';
+  return 'state-danger';
+};
 
-    const chartWidth = 700;
-    const chartHeight = 350;
-    // BREAKTHROUGH: Volume Profile extends FROM THE LEFT into the chart
-    const vpWidth = volumeProfile ? 120 : 0; // Width for integrated volume profile
-    const marginLeft = 70 + vpWidth; // Extra space for VP on left
-    const marginRight = 70;
-    const marginTop = 10;
-    const marginBottom = 20;
-    const plotWidth = chartWidth - marginLeft - marginRight;
-    const plotHeight = chartHeight - marginTop - marginBottom;
-
-    const priceToY = (price: number) => marginTop + plotHeight - ((price - adjustedLow) / adjustedRange) * plotHeight;
-    const indexToX = (idx: number) => marginLeft + (idx / (chartData.length - 1 || 1)) * plotWidth;
-    const candleWidth = Math.max(2, Math.min(8, plotWidth / chartData.length - 1));
-
-    const yTicks: number[] = [];
-    const tickCount = 6;
-    for (let i = 0; i <= tickCount; i++) {
-      const price = adjustedLow + (adjustedRange * i / tickCount);
-      yTicks.push(price);
-    }
-
-    // BREAKTHROUGH: Volume Profile bars extending FROM LEFT INTO the chart (DeepCharts style)
-    let vpBars: VpBar[] = [];
-    if (volumeProfile?.levels) {
-      const maxVol = Math.max(...volumeProfile.levels.map(l => l.volume_pct));
-      vpBars = volumeProfile.levels.map(level => {
-        // Calculate delta ratio for coloring (green = buying, orange = selling)
-        const buyRatio = level.delta > 0 ? Math.min(1, level.delta / 100) : 0;
-        const sellRatio = level.delta < 0 ? Math.min(1, Math.abs(level.delta) / 100) : 0;
-        const neutralRatio = 1 - buyRatio - sellRatio;
-        
-        return {
-          y: priceToY(level.price_high),
-          height: Math.abs(priceToY(level.price_low) - priceToY(level.price_high)),
-          // Width extends from left margin INTO the chart area
-          totalWidth: (level.volume_pct / maxVol) * vpWidth,
-          buyWidth: (level.volume_pct / maxVol) * vpWidth * buyRatio,
-          sellWidth: (level.volume_pct / maxVol) * vpWidth * sellRatio,
-          neutralWidth: (level.volume_pct / maxVol) * vpWidth * neutralRatio,
-          isPOC: Math.abs(level.price_mid - volumeProfile.poc) < (priceRange / 100),
-          isValueArea: level.is_value_area,
-          isHVN: level.is_hvn,
-          price: level.price_mid,
-          delta: level.delta,
-        };
-      });
-    }
-
-    // Swing points for market structure visualization
-    const swingHighs = marketStructure?.swing_highs || [];
-    const swingLows = marketStructure?.swing_lows || [];
-
-    return {
-      priceHigh, priceLow, priceRange, adjustedHigh, adjustedLow, adjustedRange,
-      chartWidth, chartHeight, marginLeft, marginRight, marginTop, marginBottom,
-      plotWidth, plotHeight, priceToY, indexToX, candleWidth, yTicks, vpBars,
-      vpWidth, swingHighs, swingLows
-    };
-  }, [chartData, volumeProfile, marketStructure]);
-
-  const highlightSet = useMemo(() => new Set(highlightedBars || []), [highlightedBars]);
-  const hc = highlightColor || '#06b6d4';
-
-  if (!chartCalculations) {
-    return (
-      <div className="h-full flex items-center justify-center text-slate-500">
-        <Activity className="w-6 h-6 animate-pulse mr-2" />
-        Loading Chart...
-      </div>
-    );
+const createProfile = (low: number, high: number, open: number, close: number, pressure: number, volatility: number) => {
+  const levels: InternalProfileLevel[] = [];
+  const priceLevels: PriceLevel[] = [];
+  const count = 12;
+  const range = Math.max(high - low, 0.01);
+  for (let index = 0; index < count; index += 1) {
+    const price = low + (range * index) / (count - 1);
+    const distanceFromClose = Math.abs(price - close) / range;
+    const distanceFromOpen = Math.abs(price - open) / range;
+    const centerWeight = 1 - Math.abs(index - (count - 1) / 2) / ((count - 1) / 2);
+    const attackSkew = pressure * (index / (count - 1) - 0.5);
+    const volume = Math.round(420 + 1400 * centerWeight + 240 * Math.sin(index * 1.7 + volatility));
+    const askVolume = Math.round(volume * clamp(0.52 + attackSkew - distanceFromOpen * 0.08, 0.18, 0.82));
+    const bidVolume = Math.max(0, volume - askVolume);
+    const imbalance = Math.abs(askVolume - bidVolume) / Math.max(volume, 1);
+    const absorption = clamp((distanceFromClose < 0.18 ? 0.65 : 0.2) + volatility * 0.08 + imbalance * 0.35, 0, 1);
+    const side = askVolume > bidVolume * 1.18 ? 'buy' : bidVolume > askVolume * 1.18 ? 'sell' : 'neutral';
+    levels.push({ price, volume, side });
+    priceLevels.push({ price, bidVolume, askVolume, imbalance, absorption });
   }
+  return { profile: levels, priceLevels };
+};
 
-  const {
-    chartWidth, chartHeight, marginLeft, marginRight, marginTop,
-    priceToY, indexToX, candleWidth, yTicks, vpBars, swingHighs, swingLows
-  } = chartCalculations;
+const explainCandle = (
+  sweepHigh: boolean,
+  sweepLow: boolean,
+  trappedSide: TrappedSide,
+  trustScore: number,
+  toxicity: number,
+  delta: number,
+) => {
+  if (toxicity > 0.72) return 'The book is toxic. The move is not safe enough to trust.';
+  if (sweepHigh && trappedSide === 'BUYERS') return 'Price swept above the old high, then rejected. Late buyers may be trapped.';
+  if (sweepLow && trappedSide === 'SELLERS') return 'Sellers pushed down, but buyers defended the low and absorbed the attack.';
+  if (trustScore > 0.72 && delta > 0) return 'Buyers are in control. The pullback held value and continuation is being watched.';
+  if (trustScore > 0.72 && delta < 0) return 'Sellers are in control. Buyers failed to reclaim value.';
+  return 'The market is mixed. Waiting is the edge until evidence improves.';
+};
 
-  // Calculate unified decision for display on chart
-  const currentPrice = chartData.length > 0 ? chartData[chartData.length - 1].close : 0;
-  const decisionColor = unifiedDecision?.decision?.includes('BUY') ? '#10b981' : 
-                        unifiedDecision?.decision?.includes('SELL') ? '#ef4444' : '#64748b';
+function DataAdapterMock(): MarketState {
+  const symbol = 'NQ-MICRO';
+  const timeframe = '5m';
+  const candles: CandleTruthPacket[] = [];
+  let price = 5274;
+  let cumulativeDelta = 0;
+  for (let index = 0; index < 34; index += 1) {
+    const wave = Math.sin(index * 0.58) * 8 + Math.cos(index * 0.19) * 4;
+    const shock = index === 11 ? -16 : index === 19 ? 22 : index === 27 ? -11 : 0;
+    const open = price;
+    const body = Math.sin(index * 0.74) * 5 + Math.cos(index * 0.31) * 3 + shock * 0.35;
+    const close = open + body;
+    const high = Math.max(open, close) + 4.5 + Math.abs(Math.sin(index * 0.47)) * 8 + (index === 19 ? 15 : 0);
+    const low = Math.min(open, close) - 4.5 - Math.abs(Math.cos(index * 0.53)) * 7 - (index === 11 ? 13 : 0);
+    const pressure = clamp((close - open) / Math.max(high - low, 0.1), -1, 1);
+    const volatility = Math.abs(high - low) / 28;
+    const { profile, priceLevels } = createProfile(low, high, open, close, pressure, volatility);
+    const volume = Math.round(9200 + Math.abs(body) * 560 + volatility * 2800 + (index === 19 || index === 11 ? 5400 : 0));
+    const askVolume = Math.round(volume * clamp(0.5 + pressure * 0.42 + Math.sin(index * 0.41) * 0.08, 0.22, 0.78));
+    const bidVolume = volume - askVolume;
+    const delta = askVolume - bidVolume;
+    cumulativeDelta += delta;
+    const sortedByVolume = [...profile].sort((a, b) => b.volume - a.volume);
+    const poc = sortedByVolume[0].price;
+    const vah = low + (high - low) * 0.68;
+    const val = low + (high - low) * 0.32;
+    const sweepHigh = index === 19 || (index > 2 && high > Math.max(...candles.slice(-5).map((candle) => candle.high)) && close < high - (high - low) * 0.42);
+    const sweepLow = index === 11 || (index > 2 && low < Math.min(...candles.slice(-5).map((candle) => candle.low)) && close > low + (high - low) * 0.42);
+    const trappedSide: TrappedSide = sweepHigh ? 'BUYERS' : sweepLow ? 'SELLERS' : Math.abs(delta) < volume * 0.04 ? 'NONE' : delta > 0 && close < open ? 'BUYERS' : delta < 0 && close > open ? 'SELLERS' : 'NONE';
+    const absorptionNodes = priceLevels.filter((level) => level.absorption > 0.68).slice(0, 4);
+    const imbalanceLadder = priceLevels.filter((level) => level.imbalance > 0.32).slice(0, 5);
+    const fairValueGap = index > 0 && (low > candles[index - 1].high || high < candles[index - 1].low);
+    const structuralVoid = volatility > 0.88 && Math.abs(delta) > volume * 0.24;
+    const manipulationRisk = clamp((sweepHigh || sweepLow ? 0.28 : 0.08) + (structuralVoid ? 0.22 : 0) + volatility * 0.18 + (Math.abs(delta) / volume) * 0.18);
+    const toxicity = clamp(manipulationRisk + (trappedSide !== 'NONE' ? 0.12 : 0) + (fairValueGap ? 0.1 : 0));
+    const trustScore = clamp(0.82 - toxicity * 0.42 + Math.min(absorptionNodes.length, 4) * 0.035 - (Math.abs(delta) < volume * 0.03 ? 0.12 : 0));
+    const continuationProbability = clamp(0.46 + pressure * 0.3 + trustScore * 0.22 - toxicity * 0.16);
+    const reversalProbability = clamp(0.46 - pressure * 0.26 + (trappedSide !== 'NONE' ? 0.24 : 0) - trustScore * 0.08);
+    const verdict: VerdictLabel = toxicity > 0.78 ? 'HARD_LOCK' : trustScore < 0.48 ? 'EXPLICIT_ABSTAIN' : trustScore < 0.66 ? 'WAIT' : 'EXECUTE';
+    const rejectionEdges: RejectionEdge[] = [
+      { side: 'upper', strength: clamp((high - Math.max(open, close)) / Math.max(high - low, 0.01)), price: high },
+      { side: 'lower', strength: clamp((Math.min(open, close) - low) / Math.max(high - low, 0.01)), price: low },
+    ];
+    const deltaSpine = priceLevels.map((level) => level.askVolume - level.bidVolume);
+    const beginnerExplanation = explainCandle(sweepHigh, sweepLow, trappedSide, trustScore, toxicity, delta);
+    const expertExplanation = `Delta ${delta.toLocaleString()} / CVD ${cumulativeDelta.toLocaleString()} with POC ${fmt(poc)}, VAH ${fmt(vah)}, VAL ${fmt(val)}; toxicity ${pct(toxicity)}, trust ${pct(trustScore)}.`;
+    candles.push({
+      id: `ctp-${String(index + 1).padStart(3, '0')}`,
+      timestamp: `09:${String(30 + index * 5).padStart(2, '0')}`,
+      symbol,
+      timeframe,
+      open,
+      high,
+      low,
+      close,
+      volume,
+      bidVolume,
+      askVolume,
+      delta,
+      cumulativeDelta,
+      internalProfile: profile,
+      priceLevels,
+      poc,
+      vah,
+      val,
+      acceptanceCore: { low: val, high: vah, strength: trustScore },
+      deltaSpine,
+      absorptionNodes,
+      imbalanceLadder,
+      liquiditySweepHigh: sweepHigh,
+      liquiditySweepLow: sweepLow,
+      fairValueGap,
+      structuralVoid,
+      trappedSide,
+      rejectionEdges,
+      toxicity,
+      trustScore,
+      continuationProbability,
+      reversalProbability,
+      manipulationRisk,
+      beginnerExplanation,
+      expertExplanation,
+      verdict,
+    });
+    price = close + wave * 0.12;
+  }
+  return {
+    symbol,
+    timeframe,
+    session: 'US RTH',
+    candles,
+    regime: 'Auction rotation with sweep-risk expansion',
+    higherTimeframeTrend: 'Bullish above accepted value; fragile below lower core',
+    activePlaybook: 'Sweep → Absorption → Accepted Continuation',
+    eventRisk: 'MEDIUM',
+    dataLatencyMs: 42,
+    replaySync: 0.91,
+    truthSync: 0.97,
+    systemHealth: 0.94,
+  };
+}
 
+const assessManipulation = (candle: CandleTruthPacket): ManipulationAssessment => {
+  const evidence: string[] = [];
+  if (candle.structuralVoid) evidence.push('Hollow-book move: displacement exceeded supporting profile density.');
+  if (candle.liquiditySweepHigh || candle.liquiditySweepLow) evidence.push('Liquidity sweep detected near prior auction edge.');
+  if (candle.manipulationRisk > 0.52) evidence.push('Price-volume curve deformation above normal replay band.');
+  if (candle.toxicity > 0.62) evidence.push('Toxicity halo active: order-flow support is weak for the move.');
+  if (evidence.length === 0) evidence.push('No defensive manipulation signature crossed the warning threshold.');
+  const level: RiskLevel = candle.manipulationRisk > 0.68 ? 'HIGH' : candle.manipulationRisk > 0.42 ? 'MEDIUM' : 'LOW';
+  const recommendedAction = level === 'HIGH' ? 'hard abstain' : level === 'MEDIUM' ? 'wait' : candle.toxicity > 0.45 ? 'reduce size' : 'trade allowed';
+  return { level, score: candle.manipulationRisk, evidence, recommendedAction };
+};
+
+const evaluateRiskGovernor = (decision: VerdictDecision, marketState: MarketState): RiskState => {
+  const locks: string[] = [];
+  const state = {
+    dailyMaxLossHit: false,
+    spreadTooWide: decision.spreadCost > 0.22,
+    liquidityInsufficient: decision.liquidityRisk > 0.64,
+    eventRiskHigh: marketState.eventRisk === 'HIGH',
+    staleData: marketState.dataLatencyMs > 350,
+    modelDisagreementHigh: decision.modelDisagreement > 0.36,
+    manipulationRiskHigh: decision.marketImpact > 0.72,
+    robustLowerBoundNegative: decision.robustLowerBound < 0,
+    replaySimilarityWeak: decision.replaySimilarity < 0.58,
+    hardLockActive: false,
+    locks,
+  };
+  if (state.spreadTooWide) locks.push('Spread cost violates scalping constraint.');
+  if (state.liquidityInsufficient) locks.push('Available liquidity is insufficient for the proposed path.');
+  if (state.eventRiskHigh) locks.push('Event risk is high.');
+  if (state.staleData) locks.push('Data freshness check failed.');
+  if (state.modelDisagreementHigh) locks.push('Agent council disagreement is too high.');
+  if (state.manipulationRiskHigh) locks.push('Manipulation risk breached safe limits.');
+  if (state.robustLowerBoundNegative) locks.push('Robust lower bound is negative.');
+  if (state.replaySimilarityWeak) locks.push('Replay similarity is weak.');
+  state.hardLockActive = decision.verdict === 'HARD_LOCK' || locks.length > 0;
+  return state;
+};
+
+const buildAgents = (candle: CandleTruthPacket, marketState: MarketState): AgentAnalysis[] => {
+  const now = 'live mock';
+  const bias: AgentBias = candle.delta > 500 ? 'BULLISH' : candle.delta < -500 ? 'BEARISH' : 'NEUTRAL';
+  return [
+    {
+      agentName: 'Regime Agent', confidence: 0.81, evidence: [marketState.regime, marketState.higherTimeframeTrend], bias,
+      recommendation: 'Use acceptance core as the operating boundary.', riskFlag: false, disagreementFlag: false, lastUpdated: now, canInfluenceExecution: true,
+    },
+    {
+      agentName: 'Liquidity Agent', confidence: candle.liquiditySweepHigh || candle.liquiditySweepLow ? 0.88 : 0.64,
+      evidence: [candle.liquiditySweepHigh ? 'Buy-side sweep registered.' : candle.liquiditySweepLow ? 'Sell-side sweep registered.' : 'No fresh sweep.'],
+      bias: candle.liquiditySweepLow ? 'BULLISH' : candle.liquiditySweepHigh ? 'BEARISH' : 'NEUTRAL', recommendation: candle.liquiditySweepHigh ? 'Do not chase the breakout.' : 'Track acceptance after sweep.',
+      riskFlag: candle.toxicity > 0.62, disagreementFlag: candle.trappedSide !== 'NONE' && bias !== 'NEUTRAL', lastUpdated: now, canInfluenceExecution: true,
+    },
+    {
+      agentName: 'Volume Agent', confidence: clamp(0.54 + candle.imbalanceLadder.length * 0.08), evidence: [`POC ${fmt(candle.poc)}`, `${candle.imbalanceLadder.length} imbalance bands`, `${candle.absorptionNodes.length} absorption nodes`],
+      bias, recommendation: 'Require volume to remain accepted inside the core.', riskFlag: candle.structuralVoid, disagreementFlag: Math.abs(candle.delta) < candle.volume * 0.04, lastUpdated: now, canInfluenceExecution: true,
+    },
+    {
+      agentName: 'Risk Governor', confidence: 0.93, evidence: [`Toxicity ${pct(candle.toxicity)}`, `Manipulation ${pct(candle.manipulationRisk)}`], bias: 'NEUTRAL',
+      recommendation: candle.verdict === 'HARD_LOCK' ? 'Hard lock execution.' : 'Permit only if confirmation prints.', riskFlag: candle.verdict === 'HARD_LOCK' || candle.toxicity > 0.6, disagreementFlag: false, lastUpdated: now, canInfluenceExecution: true,
+    },
+    {
+      agentName: 'Replay Agent', confidence: clamp(0.62 + candle.trustScore * 0.23 - candle.manipulationRisk * 0.14), evidence: ['Replay cluster: sweep-absorption-continuation', 'Outcome window: 8 candles'],
+      bias, recommendation: 'Promote only after post-trade proof.', riskFlag: candle.trustScore < 0.55, disagreementFlag: false, lastUpdated: now, canInfluenceExecution: true,
+    },
+    {
+      agentName: 'Beginner Translator Agent', confidence: 0.9, evidence: [candle.beginnerExplanation], bias: 'NEUTRAL', recommendation: 'Explain the market state before any action.', riskFlag: false, disagreementFlag: false, lastUpdated: now, canInfluenceExecution: false,
+    },
+  ];
+};
+
+const buildDecision = (candle: CandleTruthPacket, agents: AgentAnalysis[], marketState: MarketState): VerdictDecision => {
+  const bullishVotes = agents.filter((agent) => agent.bias === 'BULLISH').length;
+  const bearishVotes = agents.filter((agent) => agent.bias === 'BEARISH').length;
+  const disagreement = Math.abs(bullishVotes - bearishVotes) < 2 ? 0.38 : 0.18;
+  const direction: Direction = bullishVotes > bearishVotes ? 'LONG' : bearishVotes > bullishVotes ? 'SHORT' : 'NEUTRAL';
+  const volatilityCost = clamp((candle.high - candle.low) / 42);
+  const spreadCost = clamp(0.04 + candle.toxicity * 0.18);
+  const slippageCost = clamp(0.06 + candle.manipulationRisk * 0.22);
+  const marketImpact = clamp((candle.structuralVoid ? 0.72 : 0.12) + candle.volume / 60000);
+  const liquidityRisk = clamp(candle.structuralVoid ? 0.74 : 0.18 + candle.toxicity * 0.42);
+  const replaySimilarity = clamp(marketState.replaySync - candle.manipulationRisk * 0.18 + candle.trustScore * 0.08);
+  const expectedEdge = candle.trustScore * 1.9 - volatilityCost * 0.42 - slippageCost - candle.manipulationRisk * 0.7;
+  const robustLowerBound = expectedEdge - disagreement * 0.9 - (marketState.eventRisk === 'MEDIUM' ? 0.16 : 0);
+  const hardLockReasons: string[] = [];
+  if (candle.verdict === 'HARD_LOCK') hardLockReasons.push('Candle truth packet declared hard lock.');
+  if (robustLowerBound < 0) hardLockReasons.push('Robust lower bound is negative.');
+  if (candle.manipulationRisk > 0.7) hardLockReasons.push('Manipulation risk is too high.');
+  const verdict: VerdictLabel = hardLockReasons.length > 0 ? 'HARD_LOCK' : candle.verdict === 'EXECUTE' && direction !== 'NEUTRAL' ? 'EXECUTE' : candle.verdict;
+  const invalidation = direction === 'SHORT' ? candle.vah : candle.val;
+  const targetBase = direction === 'SHORT' ? candle.close - (candle.high - candle.low) * 0.7 : candle.close + (candle.high - candle.low) * 0.7;
+  return {
+    verdict,
+    direction,
+    confidence: clamp(candle.trustScore * 0.68 + agents.reduce((sum, agent) => sum + agent.confidence, 0) / agents.length * 0.32 - disagreement * 0.2),
+    reason: verdict === 'EXECUTE' ? 'Evidence is accepted, costs are inside limits, and the risk governor allows paper execution.' : verdict === 'WAIT' ? 'The idea is not proven yet; wait for acceptance and replay confirmation.' : verdict === 'EXPLICIT_ABSTAIN' ? 'Evidence is too weak or noisy; abstaining protects capital.' : 'Execution disabled by hard risk constraints.',
+    beginnerReason: verdict === 'EXECUTE' ? 'The market gave enough proof to plan a paper trade.' : verdict === 'WAIT' ? 'Wait. One more proof point is needed.' : verdict === 'EXPLICIT_ABSTAIN' ? 'Do not trade. The market is messy.' : 'Hard lock. The system is protecting you.',
+    expertReason: `${agents.length} agents voted; disagreement ${pct(disagreement)}, replay ${pct(replaySimilarity)}, robust lower bound ${expectedEdge.toFixed(2)}R → ${robustLowerBound.toFixed(2)}R.`,
+    requiredConfirmation: direction === 'SHORT' ? `Reject below ${fmt(candle.poc)} and hold beneath VAH ${fmt(candle.vah)}.` : `Accept above POC ${fmt(candle.poc)} and defend VAL ${fmt(candle.val)}.`,
+    invalidation,
+    targets: [targetBase, direction === 'SHORT' ? targetBase - 9.5 : targetBase + 9.5],
+    maxRisk: Math.abs(candle.close - invalidation) * 2,
+    executionStyle: verdict === 'EXECUTE' ? 'Passive limit entry, reduce on toxicity spike, kill switch below invalidation.' : 'No execution route.',
+    hardLockReasons,
+    expectedEdge,
+    volatilityCost,
+    spreadCost,
+    slippageCost,
+    marketImpact,
+    liquidityRisk,
+    driftDistrust: clamp(0.1 + candle.toxicity * 0.32),
+    modelDisagreement: disagreement,
+    replaySimilarity,
+    robustLowerBound,
+    riskReward: Math.abs(targetBase - candle.close) / Math.max(Math.abs(candle.close - invalidation), 0.1),
+  };
+};
+
+const buildLedger = (candle: CandleTruthPacket, agents: AgentAnalysis[], decision: VerdictDecision): LedgerEvent[] => {
+  const votes = agents.map((agent) => `${agent.agentName}:${agent.bias}:${pct(agent.confidence)}`);
+  const evidenceUsed = [`trust=${pct(candle.trustScore)}`, `toxicity=${pct(candle.toxicity)}`, `poc=${fmt(candle.poc)}`, `replay=${pct(decision.replaySimilarity)}`];
+  return Array.from({ length: 5 }, (_, index) => ({
+    eventId: `TL-${hashText(`${candle.id}-${index}`)}`,
+    candleId: candle.id,
+    timestamp: index === 0 ? candle.timestamp : `T+${index * 2}`,
+    dataChecksum: hashText(`${candle.id}-${candle.volume}-${candle.delta}-${index}`),
+    modelVersion: 'wraith-mock-0.1',
+    ruleVersion: 'legal-risk-governor-v1',
+    evidenceUsed,
+    agentVotes: votes,
+    confidenceBeforeDecision: clamp(decision.confidence - index * 0.03),
+    verdict: decision.verdict,
+    outcomeAfterNCandles: index === 0 ? 'pending replay mark' : index % 2 === 0 ? 'held inside expected path' : 'tested cancellation boundary',
+    promotedStatus: decision.verdict === 'EXECUTE' && index > 2 ? 'promoted' : decision.verdict === 'HARD_LOCK' ? 'rejected' : 'held',
+    replayHash: `R-${hashText(`${decision.reason}-${index}`)}`,
+    humanOverride: 'none',
+    riskGovernorStatus: decision.hardLockReasons.length > 0 ? 'blocked' : 'passed',
+  }));
+};
+
+const buildScenarios = (candle: CandleTruthPacket, decision: VerdictDecision): Scenario[] => [
+  {
+    name: 'Likely path', probability: candle.continuationProbability,
+    path: decision.direction === 'SHORT' ? 'Reject POC → probe lower value → cover into target 1.' : 'Defend value → reclaim POC → expand toward target 1.',
+    cancellation: decision.direction === 'SHORT' ? `Acceptance above ${fmt(candle.vah)}` : `Break and accept below ${fmt(candle.val)}`,
+  },
+  {
+    name: 'Failure path', probability: candle.reversalProbability,
+    path: decision.direction === 'SHORT' ? 'Buyers reclaim upper core and trap shorts.' : 'Sellers crack lower core and trap buyers.',
+    cancellation: `Hard invalidate at ${fmt(decision.invalidation)}.`,
+  },
+  {
+    name: 'Abstain path', probability: clamp(candle.toxicity + decision.modelDisagreement * 0.4),
+    path: 'Evidence fragments; no clean auction acceptance forms.',
+    cancellation: 'Reassess after two clean candles with lower toxicity.',
+  },
+];
+
+function Panel({ title, accent, children }: { title: string; accent: 'cyan' | 'gold' | 'danger'; children: ReactNode }) {
+  return <section className={`panel panel-${accent}`}><div className="panel-title"><span>{title}</span></div>{children}</section>;
+}
+
+function StatusPill({ label, value, wide, className }: { label: string; value: string; wide?: boolean; className?: string }) {
+  return <div className={`status-pill ${wide ? 'wide' : ''} ${className ?? ''}`}><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function ContextLine({ label, value }: { label: string; value: string }) {
+  return <div className="context-line"><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function Metric({ label, value, tone }: { label: string; value: string; tone: Tone }) {
+  return <div className={`metric metric-${tone}`}><span>{label}</span><strong>{value}</strong></div>;
+}
+
+function ManipulationDetector({ candle }: { candle: CandleTruthPacket }) {
+  const assessment = assessManipulation(candle);
   return (
-    <div className="h-full w-full relative">
-      <svg width="100%" height="100%" viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="xMidYMid meet">
-        <defs>
-          <linearGradient id="vwapBandGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#8b5cf6" stopOpacity="0.2"/>
-            <stop offset="50%" stopColor="#8b5cf6" stopOpacity="0.1"/>
-            <stop offset="100%" stopColor="#8b5cf6" stopOpacity="0.2"/>
-          </linearGradient>
-          <linearGradient id="valueAreaGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#f59e0b" stopOpacity="0.15"/>
-            <stop offset="50%" stopColor="#f59e0b" stopOpacity="0.08"/>
-            <stop offset="100%" stopColor="#f59e0b" stopOpacity="0.15"/>
-          </linearGradient>
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-            <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
-          </filter>
-                  <filter id="strongGlow">
-                    <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-                    <feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge>
-                  </filter>
-                  {/* UNPUSHABLE: Confidence Zone Gradients */}
-                  <linearGradient id="longZoneGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#10b981" stopOpacity="0.25"/>
-                    <stop offset="100%" stopColor="#10b981" stopOpacity="0.05"/>
-                  </linearGradient>
-                  <linearGradient id="shortZoneGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#ef4444" stopOpacity="0.05"/>
-                    <stop offset="100%" stopColor="#ef4444" stopOpacity="0.25"/>
-                  </linearGradient>
-                  <linearGradient id="entryZoneGradient" x1="0" y1="0" x2="1" y2="0">
-                    <stop offset="0%" stopColor="#06b6d4" stopOpacity="0.3"/>
-                    <stop offset="100%" stopColor="#06b6d4" stopOpacity="0"/>
-                  </linearGradient>
-                </defs>
+    <Panel title="Manipulation Risk" accent="danger">
+      <div className="risk-head"><span className={classForRisk(assessment.level)}>{assessment.level}</span><span>{pct(assessment.score)}</span></div>
+      <ul className="tight-list">{assessment.evidence.map((item) => <li key={item}>{item}</li>)}</ul>
+      <div className="action-pill">Recommended: {assessment.recommendedAction}</div>
+    </Panel>
+  );
+}
 
-                {/* UNPUSHABLE BREAKTHROUGH: CONFIDENCE ZONES - Visual green/red zones showing where to trade */}
-                {tradeSetup && volumeProfile && (
-                  <>
-                    {/* LONG ZONE: Below POC to VAL - High probability long area */}
-                    <rect
-                      x={marginLeft}
-                      y={priceToY(volumeProfile.poc)}
-                      width={chartWidth - marginLeft - marginRight}
-                      height={Math.abs(priceToY(volumeProfile.val) - priceToY(volumeProfile.poc))}
-                      fill="url(#longZoneGradient)"
-                    />
-                    <text x={marginLeft + 5} y={priceToY(volumeProfile.val) - 5} fill="#10b981" fontSize="8" fontWeight="bold" opacity="0.8">
-                      LONG ZONE
-                    </text>
-            
-                    {/* SHORT ZONE: Above POC to VAH - High probability short area */}
-                    <rect
-                      x={marginLeft}
-                      y={priceToY(volumeProfile.vah)}
-                      width={chartWidth - marginLeft - marginRight}
-                      height={Math.abs(priceToY(volumeProfile.poc) - priceToY(volumeProfile.vah))}
-                      fill="url(#shortZoneGradient)"
-                    />
-                    <text x={marginLeft + 5} y={priceToY(volumeProfile.vah) + 12} fill="#ef4444" fontSize="8" fontWeight="bold" opacity="0.8">
-                      SHORT ZONE
-                    </text>
-                  </>
-                )}
+function ExecutionLock({ risk, mode }: { risk: RiskState; mode: AutonomyMode }) {
+  const liveText = risk.hardLockActive ? 'Execution disabled. Risk governor is fail-closed.' : mode === 'paper' ? 'Paper autonomy armed. Live trading remains locked.' : 'Manual observation mode. No autonomous routing.';
+  return (
+    <div className={`execution-lock ${risk.hardLockActive ? 'locked' : 'armed'}`}>
+      <div className="lock-title">{risk.hardLockActive ? 'HARD LOCK' : mode === 'paper' ? 'PAPER AUTONOMY' : 'MANUAL SAFE'}</div>
+      <div>{liveText}</div>
+      {risk.locks.length > 0 && <ul>{risk.locks.map((lock) => <li key={lock}>{lock}</li>)}</ul>}
+    </div>
+  );
+}
 
-                {/* BREAKTHROUGH: Value Area shading (between VAH and VAL) */}
-        {volumeProfile && (
-          <rect
-            x={marginLeft}
-            y={priceToY(volumeProfile.vah)}
-            width={chartWidth - marginLeft - marginRight}
-            height={Math.abs(priceToY(volumeProfile.val) - priceToY(volumeProfile.vah))}
-            fill="url(#valueAreaGradient)"
-          />
-        )}
+function RiskGovernor({ decision, marketState, mode }: { decision: VerdictDecision; marketState: MarketState; mode: AutonomyMode }) {
+  const risk = evaluateRiskGovernor(decision, marketState);
+  const gates: [string, boolean][] = [
+    ['Daily max loss', risk.dailyMaxLossHit], ['Data stale', risk.staleData], ['Spread wide', risk.spreadTooWide], ['Thin liquidity', risk.liquidityInsufficient], ['Event risk', risk.eventRiskHigh], ['Model split', risk.modelDisagreementHigh], ['Manipulation', risk.manipulationRiskHigh], ['Lower bound', risk.robustLowerBoundNegative], ['Replay weak', risk.replaySimilarityWeak],
+  ];
+  return (
+    <Panel title="Risk Governor" accent={risk.hardLockActive ? 'danger' : 'gold'}>
+      <div className="governor-grid">{gates.map(([label, active]) => <div key={label} className={`gate ${active ? 'gate-closed' : 'gate-open'}`}><span>{label}</span><strong>{active ? 'LOCK' : 'PASS'}</strong></div>)}</div>
+      <ExecutionLock risk={risk} mode={mode} />
+    </Panel>
+  );
+}
 
-        {/* Background grid */}
-        <g className="grid">
-          {yTicks.map((tick, i) => (
-            <g key={i}>
-              <line 
-                x1={marginLeft} 
-                y1={priceToY(tick)} 
-                x2={chartWidth - marginRight} 
-                y2={priceToY(tick)} 
-                stroke="#1e293b" 
-                strokeDasharray="3 3"
-              />
-              <text 
-                x={5} 
-                y={priceToY(tick) + 4} 
-                fill="#64748b" 
-                fontSize="9" 
-                textAnchor="start"
-              >
-                {tick.toFixed(decimals)}
-              </text>
-            </g>
-          ))}
-        </g>
+function CandleIntelligenceEngine({ candle, mode }: { candle: CandleTruthPacket; mode: ComprehensionMode }) {
+  const lines = mode === 'beginner'
+    ? [candle.beginnerExplanation, candle.trappedSide !== 'NONE' ? `${candle.trappedSide.toLowerCase()} may be trapped.` : 'No obvious trapped side.', `Invalidation is below ${fmt(candle.val)}.`]
+    : [candle.expertExplanation, `Bid ${candle.bidVolume.toLocaleString()} / Ask ${candle.askVolume.toLocaleString()} / imbalance nodes ${candle.imbalanceLadder.length}.`, `Fair value gap: ${candle.fairValueGap ? 'yes' : 'no'}; structural void: ${candle.structuralVoid ? 'yes' : 'no'}.`];
+  return (
+    <Panel title="Candle Intelligence Engine" accent="cyan">
+      <ul className="tight-list">{lines.map((line) => <li key={line}>{line}</li>)}</ul>
+      <div className="packet-strip"><Metric label="Trust" value={pct(candle.trustScore)} tone="cyan" /><Metric label="Toxicity" value={pct(candle.toxicity)} tone="red" /><Metric label="Continuation" value={pct(candle.continuationProbability)} tone="green" /><Metric label="Reversal" value={pct(candle.reversalProbability)} tone="gold" /></div>
+    </Panel>
+  );
+}
 
-        {/* BREAKTHROUGH: DeepCharts-style Volume Profile FROM THE LEFT */}
-        {volumeProfile && vpBars.map((bar, i) => {
-          const barX = 70; // Start from left edge after price labels
-          return (
-            <g key={`vp-left-${i}`}>
-              {/* Selling pressure (orange/red) - extends first */}
-              <rect
-                x={barX}
-                y={bar.y}
-                width={bar.sellWidth}
-                height={Math.max(2, bar.height)}
-                fill="#f97316"
-                opacity={bar.isHVN ? 0.9 : bar.isValueArea ? 0.7 : 0.5}
-              />
-              {/* Buying pressure (green/cyan) - extends after selling */}
-              <rect
-                x={barX + bar.sellWidth}
-                y={bar.y}
-                width={bar.buyWidth}
-                height={Math.max(2, bar.height)}
-                fill="#10b981"
-                opacity={bar.isHVN ? 0.9 : bar.isValueArea ? 0.7 : 0.5}
-              />
-              {/* Neutral volume (yellow) */}
-              <rect
-                x={barX + bar.sellWidth + bar.buyWidth}
-                y={bar.y}
-                width={bar.neutralWidth}
-                height={Math.max(2, bar.height)}
-                fill="#fbbf24"
-                opacity={bar.isHVN ? 0.6 : 0.3}
-              />
-              {/* POC highlight */}
-              {bar.isPOC && (
-                <rect
-                  x={barX}
-                  y={bar.y}
-                  width={bar.totalWidth}
-                  height={Math.max(2, bar.height)}
-                  fill="none"
-                  stroke="#fbbf24"
-                  strokeWidth="2"
-                />
-              )}
-            </g>
-          );
+function VerdictEngine({ decision }: { decision: VerdictDecision }) {
+  return (
+    <Panel title="Decision Certificate" accent={decision.verdict === 'HARD_LOCK' ? 'danger' : 'gold'}>
+      <div className="certificate"><div className={`verdict ${classForVerdict(decision.verdict)}`}>{decision.verdict.replace('_', ' ')}</div><div className="direction">{decision.direction} · {pct(decision.confidence)}</div><p>{decision.reason}</p></div>
+      <div className="decision-grid"><Metric label="Expected edge" value={`${decision.expectedEdge.toFixed(2)}R`} tone="green" /><Metric label="Robust lower" value={`${decision.robustLowerBound.toFixed(2)}R`} tone={decision.robustLowerBound > 0 ? 'green' : 'red'} /><Metric label="Replay" value={pct(decision.replaySimilarity)} tone="cyan" /><Metric label="Model split" value={pct(decision.modelDisagreement)} tone={decision.modelDisagreement > 0.34 ? 'red' : 'gold'} /></div>
+    </Panel>
+  );
+}
+
+function BeginnerTranslator({ candle, decision }: { candle: CandleTruthPacket; decision: VerdictDecision }) {
+  return (
+    <Panel title="Beginner Explanation" accent="cyan">
+      <div className="beginner-copy">{decision.beginnerReason}</div><p>{candle.beginnerExplanation}</p>
+      <div className="what-next"><strong>What must happen next</strong><span>{decision.requiredConfirmation}</span></div>
+      <div className="what-next danger-text"><strong>What cancels the idea</strong><span>Acceptance through invalidation at {fmt(decision.invalidation)} or toxicity rising above 70%.</span></div>
+    </Panel>
+  );
+}
+
+function ScenarioEngine({ scenarios }: { scenarios: Scenario[] }) {
+  return <Panel title="Scenario Engine" accent="cyan"><div className="scenario-stack">{scenarios.map((scenario) => <div key={scenario.name} className="scenario-card"><div className="scenario-title"><span>{scenario.name}</span><strong>{pct(scenario.probability)}</strong></div><p>{scenario.path}</p><small>Cancel: {scenario.cancellation}</small></div>)}</div></Panel>;
+}
+
+function AgentCouncil({ agents }: { agents: AgentAnalysis[] }) {
+  return (
+    <Panel title="AI Agent Council" accent="gold">
+      <div className="agent-grid">{agents.map((agent) => <div key={agent.agentName} className={`agent-card ${agent.riskFlag ? 'agent-risk' : ''}`}><div className="agent-head"><strong>{agent.agentName}</strong><span>{pct(agent.confidence)}</span></div><div className={`bias bias-${agent.bias.toLowerCase()}`}>{agent.bias}</div><p>{agent.recommendation}</p><small>{agent.evidence[0]} · {agent.lastUpdated}</small><div className="agent-foot"><span>{agent.canInfluenceExecution ? 'execution vote' : 'explain only'}</span><span>{agent.disagreementFlag ? 'disagrees' : 'aligned'}</span></div></div>)}</div>
+    </Panel>
+  );
+}
+
+function TruthLedger({ ledger }: { ledger: LedgerEvent[] }) {
+  return <Panel title="Truth Ledger / Replay Proof" accent="cyan"><div className="ledger-table">{ledger.map((event) => <div key={event.eventId} className="ledger-row"><span>{event.eventId}</span><span>{event.dataChecksum}</span><span>{event.verdict.replace('_', ' ')}</span><span>{event.outcomeAfterNCandles}</span><span>{event.promotedStatus}</span><span>{event.riskGovernorStatus}</span></div>)}</div></Panel>;
+}
+
+function ReplayDiagnostics({ decision, ledger }: { decision: VerdictDecision; ledger: LedgerEvent[] }) {
+  return <div className="diagnostic-strip"><Metric label="Replay similarity" value={pct(decision.replaySimilarity)} tone="cyan" /><Metric label="Outcome proof" value={ledger[0].replayHash} tone="gold" /><Metric label="Vol cost" value={pct(decision.volatilityCost)} tone="red" /><Metric label="Spread" value={pct(decision.spreadCost)} tone="red" /><Metric label="Slippage" value={pct(decision.slippageCost)} tone="red" /><Metric label="Impact" value={pct(decision.marketImpact)} tone="gold" /></div>;
+}
+
+function TopStatusRail({ marketState, decision, mode }: { marketState: MarketState; decision: VerdictDecision; mode: AutonomyMode }) {
+  const executionMode = mode === 'paper' ? 'PAPER' : 'SIM';
+  return (
+    <header className="top-rail">
+      <div className="brand-block"><span className="micro-label">WRAITH LEAP OS</span><strong>AGI X-RAY TRADING TERMINAL</strong></div>
+      <StatusPill label="Symbol" value={marketState.symbol} /><StatusPill label="TF" value={marketState.timeframe} /><StatusPill label="Session" value={marketState.session} />
+      <StatusPill label="State" value={marketState.regime} wide /><StatusPill label="Playbook" value={marketState.activePlaybook} wide /><StatusPill label="Risk" value={mode === 'paper' ? 'Paper governed' : 'Manual'} />
+      <StatusPill label="Verdict" value={decision.verdict.replace('_', ' ')} className={classForVerdict(decision.verdict)} /><StatusPill label="Truth" value={pct(marketState.truthSync)} /><StatusPill label="Health" value={pct(marketState.systemHealth)} /><StatusPill label="Latency" value={`${marketState.dataLatencyMs}ms`} /><StatusPill label="Execution" value={decision.verdict === 'HARD_LOCK' ? 'LIVE LOCKED' : executionMode} />
+    </header>
+  );
+}
+
+function LeftContextRail({ marketState, candle, decision }: { marketState: MarketState; candle: CandleTruthPacket; decision: VerdictDecision }) {
+  return <aside className="left-rail"><Panel title="Market Context" accent="cyan"><ContextLine label="Regime" value={marketState.regime} /><ContextLine label="HTF trend" value={marketState.higherTimeframeTrend} /><ContextLine label="Liquidity" value={candle.liquiditySweepHigh ? 'Buy-side swept' : candle.liquiditySweepLow ? 'Sell-side swept' : 'Balanced'} /><ContextLine label="Event risk" value={marketState.eventRisk} /><ContextLine label="Manipulation" value={pct(candle.manipulationRisk)} /></Panel><BeginnerTranslator candle={candle} decision={decision} /><Panel title="System Locks" accent="danger"><ul className="tight-list"><li>Live execution remains locked.</li><li>No guaranteed profit claims.</li><li>Hard abstain if proof weakens.</li><li>Legal intelligence only.</li></ul></Panel></aside>;
+}
+
+function XRayMarketField({ marketState, selectedId, setSelectedId, decision }: { marketState: MarketState; selectedId: string; setSelectedId: (id: string) => void; decision: VerdictDecision }) {
+  const selected = marketState.candles.find((candle) => candle.id === selectedId) ?? marketState.candles[0];
+  const minPrice = Math.min(...marketState.candles.map((candle) => candle.low));
+  const maxPrice = Math.max(...marketState.candles.map((candle) => candle.high));
+  const priceToY = (price: number) => 290 - ((price - minPrice) / Math.max(maxPrice - minPrice, 1)) * 250;
+  const step = 820 / marketState.candles.length;
+  const selectedIndex = marketState.candles.findIndex((candle) => candle.id === selected.id);
+  const selectedX = 28 + selectedIndex * step;
+  const linePath = marketState.candles.map((candle, index) => `${index === 0 ? 'M' : 'L'} ${28 + index * step} ${priceToY(candle.close)}`).join(' ');
+  const likelyEnd = decision.direction === 'SHORT' ? decision.targets[0] : decision.targets[0];
+  const failureEnd = decision.invalidation;
+  const likelyPath = `M ${selectedX} ${priceToY(selected.close)} C 590 ${priceToY(selected.poc) - 20}, 650 ${priceToY(likelyEnd) - 30}, 795 ${priceToY(likelyEnd)}`;
+  const failurePath = `M ${selectedX} ${priceToY(selected.close)} C 590 ${priceToY(selected.val) + 45}, 680 ${priceToY(failureEnd) + 55}, 800 ${priceToY(failureEnd)}`;
+  return (
+    <main className="xray-field">
+      <div className="field-title"><div><span className="micro-label">Central X-Ray Market Field</span><strong>Panoramic IQ Candle Chart</strong></div><div className="legend"><span className="dot cyan" />truth <span className="dot gold" />value <span className="dot red" />danger</div></div>
+      <svg viewBox="0 0 900 340" className="market-svg" role="img" aria-label="X-ray candle market field">
+        <defs><linearGradient id="coreGlow" x1="0" x2="1"><stop offset="0" stopColor="#68e8ff" stopOpacity="0.05" /><stop offset="1" stopColor="#d8b76a" stopOpacity="0.16" /></linearGradient><filter id="softGlow"><feGaussianBlur stdDeviation="3" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter></defs>
+        <rect x="18" y="38" width="850" height="270" rx="22" fill="url(#coreGlow)" stroke="#1b3c49" />
+        {[selected.vah, selected.poc, selected.val].map((price, index) => <g key={price}><line x1="24" x2="864" y1={priceToY(price)} y2={priceToY(price)} stroke={index === 1 ? '#d8b76a' : '#55d8f3'} strokeDasharray={index === 1 ? '0' : '8 9'} opacity="0.65" /><text x="34" y={priceToY(price) - 5} fill={index === 1 ? '#d8b76a' : '#55d8f3'} fontSize="10">{index === 0 ? 'VAH' : index === 1 ? 'POC' : 'VAL'} {fmt(price)}</text></g>)}
+        <path d={linePath} fill="none" stroke="#7de9ff" strokeWidth="2.5" opacity="0.58" />
+        <path d={likelyPath} fill="none" stroke="#6ee7b7" strokeWidth="2" strokeDasharray="8 10" className="path-animate" />
+        <path d={failurePath} fill="none" stroke="#f97070" strokeWidth="2" strokeDasharray="5 10" className="path-animate reverse" />
+        {marketState.candles.map((candle, index) => {
+          const x = 28 + index * step;
+          const yOpen = priceToY(candle.open);
+          const yClose = priceToY(candle.close);
+          const yHigh = priceToY(candle.high);
+          const yLow = priceToY(candle.low);
+          const top = Math.min(yOpen, yClose);
+          const height = Math.max(Math.abs(yClose - yOpen), 3);
+          const selectedCandle = candle.id === selectedId;
+          const color = candle.close >= candle.open ? '#77e9c1' : '#ef7777';
+          return <g key={candle.id} onClick={() => setSelectedId(candle.id)} className="clickable-candle"><line x1={x} x2={x} y1={yHigh} y2={yLow} stroke={color} strokeWidth={selectedCandle ? 3 : 1.4} opacity="0.9" /><rect x={x - 6} y={top} width="12" height={height} rx="3" fill={color} opacity={selectedCandle ? 0.95 : 0.6} stroke={selectedCandle ? '#ffffff' : 'transparent'} />{candle.absorptionNodes.length > 2 && <circle cx={x} cy={priceToY(candle.poc)} r={selectedCandle ? 7 : 4} fill="#d8b76a" opacity="0.84" filter="url(#softGlow)" />}{(candle.liquiditySweepHigh || candle.liquiditySweepLow) && <path d={`M ${x - 7} ${candle.liquiditySweepHigh ? yHigh - 10 : yLow + 10} L ${x} ${candle.liquiditySweepHigh ? yHigh - 20 : yLow + 20} L ${x + 7} ${candle.liquiditySweepHigh ? yHigh - 10 : yLow + 10}`} fill="none" stroke="#d65cff" strokeWidth="2" />}</g>;
         })}
-
-        {/* X-axis time labels */}
-        <g className="x-axis">
-	          {chartData.filter((_, i) => i % Math.ceil(chartData.length / 6) === 0 || i === chartData.length - 1).map((candle, idx) => {
-	            const actualIdx = chartData.indexOf(candle);
-	            const x = indexToX(actualIdx);
-	            const time = candle.timestamp ? new Date(candle.timestamp).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }) : `Bar ${actualIdx}`;
-	            return (
-	              <g key={`xaxis-${idx}`}>
-	                <line x1={x} y1={chartHeight - 20} x2={x} y2={chartHeight - 15} stroke="#334155" />
-	                <text x={x} y={chartHeight - 5} fill="#64748b" fontSize="9" textAnchor="middle">{time}</text>
-	              </g>
-	            );
-	          })}
-        </g>
-
-        {/* VWAP bands */}
-        {chartData.length > 0 && chartData[0].upper_band && (
-          <path
-            d={`
-              M ${indexToX(0)} ${priceToY(chartData[0].upper_band || chartData[0].vwap)}
-              ${chartData.map((c, i) => `L ${indexToX(i)} ${priceToY(c.upper_band || c.vwap)}`).join(' ')}
-              ${chartData.slice().reverse().map((c, i) => `L ${indexToX(chartData.length - 1 - i)} ${priceToY(c.lower_band || c.vwap)}`).join(' ')}
-              Z
-            `}
-            fill="url(#vwapBandGradient)"
-          />
-        )}
-
-        {/* VWAP line */}
-        {chartData.some(c => c.vwap) && (
-          <path
-            d={`M ${chartData.map((c, i) => `${indexToX(i)} ${priceToY(c.vwap || c.close)}`).join(' L ')}`}
-            fill="none"
-            stroke="#8b5cf6"
-            strokeWidth="2"
-            strokeDasharray="5 5"
-            filter="url(#glow)"
-          />
-        )}
-
-        {/* POC, VAH, VAL lines - extending across full chart */}
-        {volumeProfile && (
-          <>
-            {/* POC - Point of Control (most important level) */}
-            <line
-              x1={70}
-              y1={priceToY(volumeProfile.poc)}
-              x2={chartWidth - marginRight}
-              y2={priceToY(volumeProfile.poc)}
-              stroke="#fbbf24"
-              strokeWidth="2"
-              opacity="0.9"
-            />
-            <rect x={chartWidth - marginRight + 5} y={priceToY(volumeProfile.poc) - 8} width="60" height="16" fill="#fbbf24" rx="2"/>
-            <text x={chartWidth - marginRight + 35} y={priceToY(volumeProfile.poc) + 4} fill="#000" fontSize="9" fontWeight="bold" textAnchor="middle">
-              POC {volumeProfile.poc.toFixed(decimals)}
-            </text>
-            
-            {/* VAH - Value Area High */}
-            <line
-              x1={70}
-              y1={priceToY(volumeProfile.vah)}
-              x2={chartWidth - marginRight}
-              y2={priceToY(volumeProfile.vah)}
-              stroke="#06b6d4"
-              strokeWidth="1.5"
-              strokeDasharray="6 3"
-              opacity="0.8"
-            />
-            <text x={chartWidth - marginRight + 5} y={priceToY(volumeProfile.vah) + 4} fill="#06b6d4" fontSize="8">VAH</text>
-            
-            {/* VAL - Value Area Low */}
-            <line
-              x1={70}
-              y1={priceToY(volumeProfile.val)}
-              x2={chartWidth - marginRight}
-              y2={priceToY(volumeProfile.val)}
-              stroke="#06b6d4"
-              strokeWidth="1.5"
-              strokeDasharray="6 3"
-              opacity="0.8"
-            />
-            <text x={chartWidth - marginRight + 5} y={priceToY(volumeProfile.val) + 4} fill="#06b6d4" fontSize="8">VAL</text>
-          </>
-        )}
-
-        {/* Liquidity sweep markers */}
-        {liquiditySweeps?.slice(0, 5).map((sweep, i) => {
-          const sweepPrice = sweep.sweep_price ?? sweep.price;
-          if (typeof sweepPrice !== 'number') return null;
-          return (
-            <g key={`sweep-${i}`}>
-              <line
-                x1={marginLeft}
-                y1={priceToY(sweepPrice)}
-                x2={chartWidth - marginRight}
-                y2={priceToY(sweepPrice)}
-                stroke={sweep.type.includes('HIGH') ? '#f59e0b' : '#3b82f6'}
-                strokeWidth="1"
-                strokeDasharray="8 4"
-                opacity="0.5"
-              />
-            </g>
-          );
-        })}
-
-        {/* BREAKTHROUGH: Swing High/Low markers for market structure */}
-        {swingHighs.slice(-5).map((sh, i) => {
-          const barIdx = chartData.findIndex((c) => Math.abs(c.high - sh.price) < 0.0001);
-          if (barIdx < 0) return null;
-          return (
-            <g key={`sh-${i}`}>
-              <circle cx={indexToX(barIdx)} cy={priceToY(sh.price) - 8} r="4" fill="#10b981" opacity="0.8"/>
-              <text x={indexToX(barIdx)} y={priceToY(sh.price) - 14} fill="#10b981" fontSize="7" textAnchor="middle">HH</text>
-            </g>
-          );
-        })}
-        {swingLows.slice(-5).map((sl, i) => {
-          const barIdx = chartData.findIndex((c) => Math.abs(c.low - sl.price) < 0.0001);
-          if (barIdx < 0) return null;
-          return (
-            <g key={`sl-${i}`}>
-              <circle cx={indexToX(barIdx)} cy={priceToY(sl.price) + 8} r="4" fill="#ef4444" opacity="0.8"/>
-              <text x={indexToX(barIdx)} y={priceToY(sl.price) + 18} fill="#ef4444" fontSize="7" textAnchor="middle">LL</text>
-            </g>
-          );
-        })}
-
-        {/* WOVEN: Highlight zone from EvidencePin.zone */}
-        {highlightZone && (
-          <rect
-            x={marginLeft}
-            y={priceToY(Math.max(highlightZone.price_low, highlightZone.price_high))}
-            width={chartWidth - marginRight - marginLeft}
-            height={Math.abs(priceToY(highlightZone.price_low) - priceToY(highlightZone.price_high))}
-            fill={hc}
-            opacity="0.12"
-          />
-        )}
-
-        {/* Candlesticks with proper OHLC rendering */}
-        {chartData.map((candle, i) => {
-          const x = indexToX(i);
-          const bullish = candle.isBullish;
-          const bodyTop = priceToY(Math.max(candle.open, candle.close));
-          const bodyBottom = priceToY(Math.min(candle.open, candle.close));
-          const bodyHeight = Math.max(1, bodyBottom - bodyTop);
-          const wickTop = priceToY(candle.high);
-          const wickBottom = priceToY(candle.low);
-          const color = bullish ? '#10b981' : '#ef4444';
-          const isHighlighted = highlightSet.has(i);
-
-          return (
-            <g key={i} className="candle">
-              {isHighlighted && (
-                <rect
-                  x={x - candleWidth}
-                  y={wickTop - 3}
-                  width={candleWidth * 2}
-                  height={Math.max(6, wickBottom - wickTop + 6)}
-                  fill="none"
-                  stroke={hc}
-                  strokeWidth="2"
-                  rx="2"
-                  opacity="0.9"
-                />
-              )}
-              {/* Upper wick */}
-              <line x1={x} y1={wickTop} x2={x} y2={bodyTop} stroke={color} strokeWidth="1"/>
-              {/* Lower wick */}
-              <line x1={x} y1={bodyBottom} x2={x} y2={wickBottom} stroke={color} strokeWidth="1"/>
-              {/* Candle body */}
-              <rect
-                x={x - candleWidth / 2}
-                y={bodyTop}
-                width={candleWidth}
-                height={bodyHeight}
-                fill={color}
-                stroke={color}
-                strokeWidth="1"
-                rx="1"
-              />
-            </g>
-          );
-        })}
-
-                {/* Current price line with decision indicator */}
-                {chartData.length > 0 && (
-                  <g>
-                    <line
-                      x1={marginLeft}
-                      y1={priceToY(currentPrice)}
-                      x2={chartWidth - marginRight}
-                      y2={priceToY(currentPrice)}
-                      stroke="#ffffff"
-                      strokeWidth="1"
-                      strokeDasharray="2 2"
-                    />
-                    <rect
-                      x={chartWidth - marginRight - 55}
-                      y={priceToY(currentPrice) - 10}
-                      width="50"
-                      height="20"
-                      fill={chartData[chartData.length - 1].isBullish ? '#10b981' : '#ef4444'}
-                      rx="3"
-                    />
-                    <text
-                      x={chartWidth - marginRight - 30}
-                      y={priceToY(currentPrice) + 4}
-                      fill="white"
-                      fontSize="9"
-                      fontWeight="bold"
-                      textAnchor="middle"
-                    >
-                      {currentPrice.toFixed(decimals)}
-                    </text>
-                  </g>
-                )}
-
-                {/* UNPUSHABLE BREAKTHROUGH: ENTRY/EXIT MARKERS - Show exact trade levels on chart */}
-                {tradeSetup && tradeSetup.direction !== 'NEUTRAL' && (
-                  <g>
-                    {/* ENTRY LINE - Cyan with glow */}
-                    <line
-                      x1={marginLeft}
-                      y1={priceToY(tradeSetup.entry)}
-                      x2={chartWidth - marginRight}
-                      y2={priceToY(tradeSetup.entry)}
-                      stroke="#06b6d4"
-                      strokeWidth="2"
-                      strokeDasharray="8 4"
-                      filter="url(#glow)"
-                    />
-                    <rect x={marginLeft} y={priceToY(tradeSetup.entry) - 10} width="55" height="20" fill="#06b6d4" rx="3"/>
-                    <text x={marginLeft + 27} y={priceToY(tradeSetup.entry) + 4} fill="white" fontSize="8" fontWeight="bold" textAnchor="middle">
-                      ENTRY
-                    </text>
-            
-                    {/* STOP LOSS LINE - Red with warning */}
-                    <line
-                      x1={marginLeft}
-                      y1={priceToY(tradeSetup.stopLoss)}
-                      x2={chartWidth - marginRight}
-                      y2={priceToY(tradeSetup.stopLoss)}
-                      stroke="#ef4444"
-                      strokeWidth="2"
-                      strokeDasharray="4 2"
-                    />
-                    <rect x={marginLeft} y={priceToY(tradeSetup.stopLoss) - 10} width="55" height="20" fill="#ef4444" rx="3"/>
-                    <text x={marginLeft + 27} y={priceToY(tradeSetup.stopLoss) + 4} fill="white" fontSize="8" fontWeight="bold" textAnchor="middle">
-                      STOP
-                    </text>
-            
-                    {/* TARGET 1 LINE - Green with glow */}
-                    <line
-                      x1={marginLeft}
-                      y1={priceToY(tradeSetup.target1)}
-                      x2={chartWidth - marginRight}
-                      y2={priceToY(tradeSetup.target1)}
-                      stroke="#10b981"
-                      strokeWidth="2"
-                      strokeDasharray="8 4"
-                      filter="url(#glow)"
-                    />
-                    <rect x={marginLeft} y={priceToY(tradeSetup.target1) - 10} width="55" height="20" fill="#10b981" rx="3"/>
-                    <text x={marginLeft + 27} y={priceToY(tradeSetup.target1) + 4} fill="white" fontSize="8" fontWeight="bold" textAnchor="middle">
-                      TP1
-                    </text>
-            
-                    {/* TARGET 2 LINE - Gold for extended target */}
-                    <line
-                      x1={marginLeft}
-                      y1={priceToY(tradeSetup.target2)}
-                      x2={chartWidth - marginRight}
-                      y2={priceToY(tradeSetup.target2)}
-                      stroke="#f59e0b"
-                      strokeWidth="1.5"
-                      strokeDasharray="6 3"
-                    />
-                    <rect x={marginLeft} y={priceToY(tradeSetup.target2) - 10} width="55" height="20" fill="#f59e0b" rx="3"/>
-                    <text x={marginLeft + 27} y={priceToY(tradeSetup.target2) + 4} fill="white" fontSize="8" fontWeight="bold" textAnchor="middle">
-                      TP2
-                    </text>
-            
-                    {/* RISK:REWARD VISUALIZATION - Show the trade setup visually */}
-                    {tradeSetup.direction === 'LONG' && (
-                      <g>
-                        {/* Risk zone (entry to stop) - red shaded */}
-                        <rect
-                          x={chartWidth - marginRight - 25}
-                          y={priceToY(tradeSetup.entry)}
-                          width="20"
-                          height={Math.abs(priceToY(tradeSetup.stopLoss) - priceToY(tradeSetup.entry))}
-                          fill="#ef4444"
-                          opacity="0.3"
-                        />
-                        {/* Reward zone (entry to target) - green shaded */}
-                        <rect
-                          x={chartWidth - marginRight - 25}
-                          y={priceToY(tradeSetup.target1)}
-                          width="20"
-                          height={Math.abs(priceToY(tradeSetup.entry) - priceToY(tradeSetup.target1))}
-                          fill="#10b981"
-                          opacity="0.3"
-                        />
-                        <text x={chartWidth - marginRight - 15} y={priceToY((tradeSetup.entry + tradeSetup.target1) / 2)} fill="#10b981" fontSize="7" fontWeight="bold" textAnchor="middle">
-                          {tradeSetup.riskReward1.toFixed(1)}R
-                        </text>
-                      </g>
-                    )}
-                    {tradeSetup.direction === 'SHORT' && (
-                      <g>
-                        {/* Risk zone (entry to stop) - red shaded */}
-                        <rect
-                          x={chartWidth - marginRight - 25}
-                          y={priceToY(tradeSetup.stopLoss)}
-                          width="20"
-                          height={Math.abs(priceToY(tradeSetup.entry) - priceToY(tradeSetup.stopLoss))}
-                          fill="#ef4444"
-                          opacity="0.3"
-                        />
-                        {/* Reward zone (entry to target) - green shaded */}
-                        <rect
-                          x={chartWidth - marginRight - 25}
-                          y={priceToY(tradeSetup.entry)}
-                          width="20"
-                          height={Math.abs(priceToY(tradeSetup.target1) - priceToY(tradeSetup.entry))}
-                          fill="#10b981"
-                          opacity="0.3"
-                        />
-                        <text x={chartWidth - marginRight - 15} y={priceToY((tradeSetup.entry + tradeSetup.target1) / 2)} fill="#10b981" fontSize="7" fontWeight="bold" textAnchor="middle">
-                          {tradeSetup.riskReward1.toFixed(1)}R
-                        </text>
-                      </g>
-                    )}
-                  </g>
-                )}
-
-                {/* BREAKTHROUGH: Unified Decision Badge on Chart */}
-        {unifiedDecision && (
-          <g transform={`translate(${chartWidth - marginRight - 80}, ${marginTop + 5})`}>
-            <rect x="0" y="0" width="75" height="45" fill="#0f172a" stroke={decisionColor} strokeWidth="2" rx="6" opacity="0.95"/>
-            <text x="37" y="15" fill={decisionColor} fontSize="10" fontWeight="bold" textAnchor="middle">
-              {unifiedDecision.decision}
-            </text>
-            <text x="37" y="28" fill="#94a3b8" fontSize="8" textAnchor="middle">
-              {unifiedDecision.confidence.toFixed(0)}% conf
-            </text>
-            <rect x="5" y="33" width={65 * (unifiedDecision.confidence / 100)} height="6" fill={decisionColor} rx="2" opacity="0.7"/>
-          </g>
-        )}
-
-        {/* Legend - Updated for DeepCharts style */}
-        <g transform={`translate(${marginLeft + 5}, ${marginTop + 8})`}>
-          <rect x="-3" y="-8" width="180" height="18" fill="#0f172a" opacity="0.8" rx="3"/>
-          <rect x="0" y="-3" width="8" height="8" fill="#10b981"/>
-          <text x="12" y="4" fill="#94a3b8" fontSize="8">Buy Vol</text>
-          <rect x="50" y="-3" width="8" height="8" fill="#f97316"/>
-          <text x="62" y="4" fill="#94a3b8" fontSize="8">Sell Vol</text>
-          <rect x="105" y="-3" width="8" height="8" fill="#fbbf24"/>
-          <text x="117" y="4" fill="#94a3b8" fontSize="8">POC</text>
-          <line x1="145" y1="1" x2="160" y2="1" stroke="#8b5cf6" strokeWidth="2" strokeDasharray="3 2"/>
-          <text x="163" y="4" fill="#94a3b8" fontSize="8">VWAP</text>
-        </g>
+        <rect x="594" y="72" width="236" height="88" rx="16" fill="#050a12" stroke="#284552" opacity="0.92" />
+        <text x="610" y="96" fill="#8beaff" fontSize="11">SELECTED MARKET TRUTH PACKET</text><text x="610" y="122" fill="#ffffff" fontSize="21" fontWeight="700">{selected.id} · {selected.verdict.replace('_', ' ')}</text><text x="610" y="145" fill="#9fb2c4" fontSize="12">Trap: {selected.trappedSide} · Trust {pct(selected.trustScore)} · Toxicity {pct(selected.toxicity)}</text>
       </svg>
+    </main>
+  );
+}
+
+function IQCandle({ candle }: { candle: CandleTruthPacket }) {
+  const min = candle.low;
+  const max = candle.high;
+  const priceToY = (price: number) => 420 - ((price - min) / Math.max(max - min, 1)) * 360;
+  return (
+    <svg viewBox="0 0 460 470" className="iq-candle-svg" role="img" aria-label="Exploded IQ candle capsule">
+      <defs><linearGradient id="shell" x1="0" x2="0" y1="0" y2="1"><stop stopColor="#061625" /><stop offset="0.5" stopColor="#0a2230" /><stop offset="1" stopColor="#04070d" /></linearGradient><radialGradient id="tox"><stop stopColor="#f05252" stopOpacity={candle.toxicity} /><stop offset="1" stopColor="#f05252" stopOpacity="0" /></radialGradient></defs>
+      <rect x="0" y="0" width="460" height="470" rx="28" fill="#020409" /><ellipse cx="230" cy="236" rx="152" ry="210" fill="url(#tox)" opacity="0.25" /><rect x="183" y="50" width="94" height="370" rx="46" fill="url(#shell)" stroke="#6ce6ff" strokeWidth="2" />
+      <rect x="194" y={priceToY(candle.vah)} width="72" height={Math.max(priceToY(candle.val) - priceToY(candle.vah), 8)} rx="18" fill="#d8b76a" opacity="0.18" stroke="#d8b76a" />
+      <line x1="120" x2="340" y1={priceToY(candle.open)} y2={priceToY(candle.open)} stroke="#9fb2c4" strokeDasharray="4 8" /><line x1="120" x2="340" y1={priceToY(candle.close)} y2={priceToY(candle.close)} stroke="#ffffff" strokeWidth="2" /><line x1="142" x2="318" y1={priceToY(candle.poc)} y2={priceToY(candle.poc)} stroke="#d8b76a" strokeWidth="4" />
+      {candle.priceLevels.map((level, index) => { const y = priceToY(level.price); const width = 10 + level.imbalance * 56; const x = level.askVolume >= level.bidVolume ? 238 : 222 - width; return <rect key={`${level.price}-${index}`} x={x} y={y - 4} width={width} height="8" rx="4" fill={level.askVolume >= level.bidVolume ? '#67e8f9' : '#ef7777'} opacity={0.35 + level.absorption * 0.44} />; })}
+      {candle.absorptionNodes.map((level) => <circle key={`abs-${level.price}`} cx="314" cy={priceToY(level.price)} r="7" fill="#d8b76a" opacity="0.92" />)}{candle.imbalanceLadder.map((level) => <path key={`imb-${level.price}`} d={`M 146 ${priceToY(level.price)} L 168 ${priceToY(level.price) - 8} L 168 ${priceToY(level.price) + 8} Z`} fill="#d65cff" opacity="0.72" />)}
+      <text x="30" y="48" fill="#8beaff" fontSize="11">OUTER PRICE SHELL</text><text x="298" y={priceToY(candle.high) + 4} fill="#9fb2c4" fontSize="11">HIGH {fmt(candle.high)}</text><text x="298" y={priceToY(candle.low) + 4} fill="#9fb2c4" fontSize="11">LOW {fmt(candle.low)}</text><text x="24" y={priceToY(candle.poc) + 4} fill="#d8b76a" fontSize="11">POC / AUCTION HEART</text><text x="24" y={priceToY(candle.close) - 8} fill="#ffffff" fontSize="11">CLOSE {fmt(candle.close)}</text><text x="28" y="430" fill="#fca5a5" fontSize="12">Toxicity halo · {pct(candle.toxicity)}</text><text x="248" y="430" fill="#6ee7b7" fontSize="12">Trust state · {pct(candle.trustScore)}</text>
+    </svg>
+  );
+}
+
+function IQCandleCapsule({ candle, decision, agents, ledger, mode }: { candle: CandleTruthPacket; decision: VerdictDecision; agents: AgentAnalysis[]; ledger: LedgerEvent[]; mode: ComprehensionMode }) {
+  return <section className="capsule-orbit"><div className="orbit-panel left-orbit"><VerdictEngine decision={decision} /><CandleIntelligenceEngine candle={candle} mode={mode} /></div><div className="candle-stage"><div className="stage-header"><span className="micro-label">Flagship mode</span><h1>IQ Candle Capsule</h1><p>The candle is a Market Truth Packet, anatomically opened.</p></div><IQCandle candle={candle} /></div><div className="orbit-panel right-orbit"><AgentCouncil agents={agents.slice(0, 3)} /><TruthLedger ledger={ledger.slice(0, 3)} /></div></section>;
+}
+
+function SelectedCandleInspector({ candle, mode }: { candle: CandleTruthPacket; mode: ComprehensionMode }) {
+  return <Panel title="Selected Candle Inspector" accent="cyan"><div className="inspector-grid"><Metric label="Open" value={fmt(candle.open)} tone="neutral" /><Metric label="High" value={fmt(candle.high)} tone="green" /><Metric label="Low" value={fmt(candle.low)} tone="red" /><Metric label="Close" value={fmt(candle.close)} tone="cyan" /><Metric label="Delta" value={candle.delta.toLocaleString()} tone={candle.delta >= 0 ? 'green' : 'red'} /><Metric label="CVD" value={candle.cumulativeDelta.toLocaleString()} tone="gold" /><Metric label="POC" value={fmt(candle.poc)} tone="gold" /><Metric label="Trap" value={candle.trappedSide} tone={candle.trappedSide === 'NONE' ? 'neutral' : 'red'} /></div><p>{mode === 'beginner' ? candle.beginnerExplanation : candle.expertExplanation}</p></Panel>;
+}
+
+function DecisionSpine({ candle, decision, mode }: { candle: CandleTruthPacket; decision: VerdictDecision; mode: ComprehensionMode }) {
+  const executeItems = decision.verdict === 'EXECUTE'
+    ? [['Entry zone', `${fmt(candle.val)} → ${fmt(candle.poc)}`], ['Trigger', decision.requiredConfirmation], ['Invalidation', fmt(decision.invalidation)], ['Target 1', fmt(decision.targets[0])], ['Target 2', fmt(decision.targets[1])], ['Max loss', `$${fmt(decision.maxRisk, 0)}`], ['Style', decision.executionStyle]]
+    : decision.verdict === 'WAIT'
+      ? [['Missing', 'Accepted proof candle'], ['Must confirm', decision.requiredConfirmation], ['Must hold', fmt(decision.invalidation)], ['Cancels', 'Toxicity expansion or failed replay']]
+      : decision.verdict === 'EXPLICIT_ABSTAIN'
+        ? [['Why not', decision.reason], ['Toxicity source', `${pct(candle.toxicity)} halo`], ['Missing evidence', 'Agent agreement and replay strength'], ['Reassess', 'After two clean candles']]
+        : [['Execution disabled', 'HARD LOCK'], ['Violated constraints', decision.hardLockReasons.join(' ') || 'Risk governor lock'], ['Operator action', 'Stand down'], ['Reassess', 'Only after constraints clear']];
+  return <aside className="decision-spine"><VerdictEngine decision={decision} /><Panel title="Execution Spine" accent={decision.verdict === 'HARD_LOCK' ? 'danger' : 'gold'}><div className="spine-metrics"><Metric label="Direction" value={decision.direction} tone="cyan" /><Metric label="Confidence" value={pct(decision.confidence)} tone="green" /><Metric label="Risk/Reward" value={decision.riskReward.toFixed(2)} tone="gold" /><Metric label="Max risk" value={`$${fmt(decision.maxRisk, 0)}`} tone="red" /></div><div className="spine-list">{executeItems.map(([label, value]) => <ContextLine key={label} label={label} value={value} />)}</div><p className="expert-reason">{mode === 'beginner' ? decision.beginnerReason : decision.expertReason}</p></Panel><ManipulationDetector candle={candle} /></aside>;
+}
+
+function ArchitectureSummary() {
+  return <section className="architecture-summary"><Panel title="Architecture Summary" accent="cyan"><div className="arch-flow">{['MarketState', 'FeatureExtraction', 'AgentInput', 'AgentAnalysis', 'EvidenceBundle', 'VerdictContribution', 'FinalDecision'].map((step) => <span key={step}>{step}</span>)}</div><p>Mock adapters generate legal replay data; the candle engine converts it into Market Truth Packets; the agent council votes; the verdict engine combines evidence, cost, replay, and risk; the governor can abstain or hard-lock execution.</p></Panel></section>;
+}
+
+const brittlePoints: BrittlePoint[] = [
+  { name: 'Mock data may look smarter than real data', whyItBreaks: 'Synthetic patterns can accidentally flatter the UI and hide feed noise.', technicalFix: 'Tag all mock data as simulation, add adapter conformance tests, replay real historical sessions before enabling decisions.' },
+  { name: 'AI agents may hallucinate', whyItBreaks: 'A language model can invent evidence that the data did not prove.', technicalFix: 'Require every agent recommendation to cite typed EvidenceBundle IDs from the feature extractor; reject uncited claims.' },
+  { name: 'Candles may over-explain random noise', whyItBreaks: 'Microstructure noise can masquerade as intent.', technicalFix: 'Gate explanations behind minimum volume, replay similarity, and multi-agent agreement thresholds.' },
+  { name: 'Beginner mode may oversimplify risk', whyItBreaks: 'Plain English can feel like certainty.', technicalFix: 'Beginner translation must include invalidation, uncertainty, and abstain language on every decision.' },
+  { name: 'Expert mode may overload the screen', whyItBreaks: 'Too many metrics can reduce decision quality.', technicalFix: 'Use progressive disclosure: summary first, then drill-down packets and ledger rows.' },
+  { name: 'Autonomous execution can be dangerous', whyItBreaks: 'Automation can route orders during stale data or regime breaks.', technicalFix: 'Keep live locked, require signed decision certificates, and enforce risk-governor gates server-side.' },
+  { name: 'Manipulation detection can false-positive', whyItBreaks: 'Legitimate liquidity gaps can resemble suspicious flow.', technicalFix: 'Report defensive risk levels only, pair each flag with evidence, and require human review above medium risk.' },
+  { name: 'Replay can overfit', whyItBreaks: 'A similar past setup can fail under a new regime.', technicalFix: 'Use purged walk-forward replay, regime labels, failure cases, and expiration rules for promoted lessons.' },
+  { name: 'Latency can break scalping assumptions', whyItBreaks: 'A good signal decays if data or order routing lags.', technicalFix: 'Track feed age, decision age, route latency, and auto-hard-lock when latency exceeds strategy tolerance.' },
+  { name: 'Market regimes can change suddenly', whyItBreaks: 'The best playbook can become invalid in one event candle.', technicalFix: 'Run continuous regime detection and force WAIT/HARD_LOCK during event risk or detected transition.' },
+  { name: 'Legal boundaries must remain hard-coded', whyItBreaks: 'A flexible AI system could suggest prohibited behavior if not constrained.', technicalFix: 'Encode a non-bypassable policy layer blocking manipulation, front-running, spoofing, wash trading, and profit guarantees.' },
+];
+
+function BrittlePoints() {
+  return <section className="brittle-section"><Panel title="Brittle Points → Concrete Fixes" accent="danger"><div className="brittle-grid">{brittlePoints.map((point) => <div key={point.name} className="brittle-card"><strong>{point.name}</strong><p>{point.whyItBreaks}</p><span>{point.technicalFix}</span></div>)}</div></Panel></section>;
+}
+
+function TerminalShell() {
+  const marketState = useMemo(() => DataAdapterMock(), []);
+  const [selectedId, setSelectedId] = useState(marketState.candles[19].id);
+  const [terminalMode, setTerminalMode] = useState<TerminalMode>('capsule');
+  const [comprehensionMode, setComprehensionMode] = useState<ComprehensionMode>('beginner');
+  const [autonomyMode, setAutonomyMode] = useState<AutonomyMode>('manual');
+  const selectedCandle = marketState.candles.find((candle) => candle.id === selectedId) ?? marketState.candles[0];
+  const agents = useMemo(() => buildAgents(selectedCandle, marketState), [marketState, selectedCandle]);
+  const decision = useMemo(() => buildDecision(selectedCandle, agents, marketState), [selectedCandle, agents, marketState]);
+  const ledger = useMemo(() => buildLedger(selectedCandle, agents, decision), [selectedCandle, agents, decision]);
+  const scenarios = useMemo(() => buildScenarios(selectedCandle, decision), [selectedCandle, decision]);
+  return (
+    <div className="wraith-shell">
+      <TopStatusRail marketState={marketState} decision={decision} mode={autonomyMode} />
+      <div className="control-deck"><button type="button" onClick={() => setTerminalMode(terminalMode === 'capsule' ? 'command' : 'capsule')}>{terminalMode === 'capsule' ? 'Switch to X-Ray Command Terminal' : 'Switch to IQ Candle Capsule'}</button><button type="button" onClick={() => setComprehensionMode(comprehensionMode === 'beginner' ? 'expert' : 'beginner')}>{comprehensionMode === 'beginner' ? 'Beginner Layer' : 'Expert Evidence Layer'}</button><button type="button" onClick={() => setAutonomyMode(autonomyMode === 'manual' ? 'paper' : 'manual')}>{autonomyMode === 'manual' ? 'Manual Mode' : 'Paper Autonomous Mode'}</button></div>
+      {terminalMode === 'capsule' ? <IQCandleCapsule candle={selectedCandle} decision={decision} agents={agents} ledger={ledger} mode={comprehensionMode} /> : <div className="terminal-grid"><LeftContextRail marketState={marketState} candle={selectedCandle} decision={decision} /><div className="center-stack"><XRayMarketField marketState={marketState} selectedId={selectedId} setSelectedId={setSelectedId} decision={decision} /><ReplayDiagnostics decision={decision} ledger={ledger} /><div className="lower-grid"><SelectedCandleInspector candle={selectedCandle} mode={comprehensionMode} /><ScenarioEngine scenarios={scenarios} /><RiskGovernor decision={decision} marketState={marketState} mode={autonomyMode} /></div><AgentCouncil agents={agents} /><TruthLedger ledger={ledger} /></div><DecisionSpine candle={selectedCandle} decision={decision} mode={comprehensionMode} /></div>}
+      {terminalMode === 'capsule' && <div className="capsule-bottom"><SelectedCandleInspector candle={selectedCandle} mode={comprehensionMode} /><ScenarioEngine scenarios={scenarios} /><RiskGovernor decision={decision} marketState={marketState} mode={autonomyMode} /><ReplayDiagnostics decision={decision} ledger={ledger} /></div>}
+      <ArchitectureSummary /><BrittlePoints />
     </div>
   );
-};
-
-const DeltaChart = ({ data }: { data: DeltaPoint[] }) => {
-  if (!data || data.length === 0) return <div className="h-full flex items-center justify-center text-slate-500">Loading...</div>;
-
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <BarChart data={data} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-        <XAxis dataKey="idx" tick={false} stroke="#334155" />
-        <YAxis stroke="#334155" tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={(v) => v > 1000 ? `${(v/1000).toFixed(0)}k` : v.toFixed(0)} />
-        <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px' }} formatter={(value: number) => [value.toFixed(0), 'Delta']} />
-        <ReferenceLine y={0} stroke="#64748b" />
-        <Bar dataKey="delta">
-          {data.map((entry, index) => (
-            <Cell key={`cell-${index}`} fill={entry.is_bullish ? '#10b981' : '#ef4444'} fillOpacity={0.8} />
-          ))}
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
-  );
-};
-
-const CumulativeDeltaChart = ({ data }: { data: DeltaPoint[] }) => {
-  if (!data || data.length === 0) return <div className="h-full flex items-center justify-center text-slate-500">Loading...</div>;
-
-  const lastDelta = data[data.length - 1]?.cumulative_delta || 0;
-  const isBullish = lastDelta > 0;
-
-  return (
-    <ResponsiveContainer width="100%" height="100%">
-      <AreaChart data={data} margin={{ top: 5, right: 5, left: 0, bottom: 0 }}>
-        <defs>
-          <linearGradient id="deltaGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor={isBullish ? '#10b981' : '#ef4444'} stopOpacity={0.4}/>
-            <stop offset="95%" stopColor={isBullish ? '#10b981' : '#ef4444'} stopOpacity={0}/>
-          </linearGradient>
-        </defs>
-        <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-        <XAxis dataKey="idx" tick={false} stroke="#334155" />
-        <YAxis stroke="#334155" tick={{ fill: '#64748b', fontSize: 10 }} tickFormatter={(v) => v > 1000 ? `${(v/1000).toFixed(0)}k` : v.toFixed(0)} />
-        <Tooltip contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '8px' }} formatter={(value: number) => [value.toFixed(0), 'Cumulative Delta']} />
-        <ReferenceLine y={0} stroke="#64748b" strokeDasharray="3 3" />
-        <Area type="monotone" dataKey="cumulative_delta" stroke={isBullish ? '#10b981' : '#ef4444'} fill="url(#deltaGradient)" strokeWidth={2} />
-      </AreaChart>
-    </ResponsiveContainer>
-  );
-};
-
-// DeepCharts-style Delta Profile - Shows buying vs selling at each price level
-// BREAKTHROUGH: Unified Intelligence Visualization
-// This component shows HOW the system THINKS - not just data, but REASONING
-const UnifiedIntelligence = ({ 
-  volumeProfile, 
-  orderFlow, 
-  marketStructure, 
-  delta,
-  currentPrice,
-  weavePacket,
-}: { 
-  volumeProfile: VolumeProfile | null,
-  orderFlow: OrderFlowImbalance | null,
-  marketStructure: MarketStructure | null,
-  riskMetrics: RiskMetrics | null,
-  delta: DeltaPoint[],
-  currentPrice: number,
-  symbol: string,
-  weavePacket?: WeavePacket | null
-}) => {
-  // Calculate unified intelligence scores
-  const volumeSignal = useMemo(() => {
-    if (!volumeProfile) return { score: 0, bias: 'NEUTRAL', reason: 'No data' };
-    
-    if (currentPrice > volumeProfile.vah) {
-      return { score: 0.8, bias: 'BULLISH', reason: 'Price above Value Area High - breakout territory' };
-    } else if (currentPrice < volumeProfile.val) {
-      return { score: -0.8, bias: 'BEARISH', reason: 'Price below Value Area Low - breakdown territory' };
-    } else if (currentPrice > volumeProfile.poc) {
-      return { score: 0.3, bias: 'BULLISH', reason: 'Price above POC - buyers in control' };
-    } else {
-      return { score: -0.3, bias: 'BEARISH', reason: 'Price below POC - sellers in control' };
-    }
-  }, [volumeProfile, currentPrice]);
-
-  const deltaSignal = useMemo(() => {
-    if (!delta || delta.length === 0) return { score: 0, bias: 'NEUTRAL', reason: 'No delta data' };
-    const lastDelta = delta[delta.length - 1]?.cumulative_delta || 0;
-    const prevDelta = delta[Math.max(0, delta.length - 10)]?.cumulative_delta || 0;
-    const deltaTrend = lastDelta - prevDelta;
-    
-    if (deltaTrend > 1000) {
-      return { score: 0.9, bias: 'BULLISH', reason: 'Strong buying pressure - cumulative delta rising' };
-    } else if (deltaTrend < -1000) {
-      return { score: -0.9, bias: 'BEARISH', reason: 'Strong selling pressure - cumulative delta falling' };
-    } else if (deltaTrend > 0) {
-      return { score: 0.4, bias: 'BULLISH', reason: 'Moderate buying - delta trending up' };
-    } else {
-      return { score: -0.4, bias: 'BEARISH', reason: 'Moderate selling - delta trending down' };
-    }
-  }, [delta]);
-
-  const orderFlowSignal = useMemo(() => {
-    if (!orderFlow) return { score: 0, bias: 'NEUTRAL', reason: 'No order flow data' };
-    const ofi = orderFlow.ofi_normalized;
-    
-    if (ofi > 0.5) {
-      return { score: 0.85, bias: 'BULLISH', reason: 'Heavy buying imbalance detected' };
-    } else if (ofi < -0.5) {
-      return { score: -0.85, bias: 'BEARISH', reason: 'Heavy selling imbalance detected' };
-    } else if (ofi > 0.1) {
-      return { score: 0.3, bias: 'BULLISH', reason: 'Slight buying pressure' };
-    } else if (ofi < -0.1) {
-      return { score: -0.3, bias: 'BEARISH', reason: 'Slight selling pressure' };
-    }
-    return { score: 0, bias: 'NEUTRAL', reason: 'Order flow balanced' };
-  }, [orderFlow]);
-
-  const structureSignal = useMemo(() => {
-    if (!marketStructure) return { score: 0, bias: 'NEUTRAL', reason: 'No structure data' };
-    
-    if (marketStructure.structure === 'BULLISH') {
-      return { score: 0.7, bias: 'BULLISH', reason: 'Higher highs and higher lows - uptrend' };
-    } else if (marketStructure.structure === 'BEARISH') {
-      return { score: -0.7, bias: 'BEARISH', reason: 'Lower highs and lower lows - downtrend' };
-    }
-    return { score: 0, bias: 'NEUTRAL', reason: 'Ranging market - no clear direction' };
-  }, [marketStructure]);
-
-  // UNIFIED CONFLUENCE SCORE - The brain's final decision
-  const confluenceScore = useMemo(() => {
-    const weights = { volume: 0.25, delta: 0.30, orderFlow: 0.25, structure: 0.20 };
-    const score = 
-      volumeSignal.score * weights.volume +
-      deltaSignal.score * weights.delta +
-      orderFlowSignal.score * weights.orderFlow +
-      structureSignal.score * weights.structure;
-    
-    return score;
-  }, [volumeSignal, deltaSignal, orderFlowSignal, structureSignal]);
-
-  // Generate the system's REASONING
-  const systemReasoning = useMemo(() => {
-    const signals = [
-      { name: 'Volume Profile', ...volumeSignal, weight: 25 },
-      { name: 'Delta Flow', ...deltaSignal, weight: 30 },
-      { name: 'Order Flow', ...orderFlowSignal, weight: 25 },
-      { name: 'Structure', ...structureSignal, weight: 20 },
-    ];
-    
-    const bullish = signals.filter(s => s.score > 0);
-    const bearish = signals.filter(s => s.score < 0);
-    
-    let decision = 'WAIT';
-    const confidence = Math.abs(confluenceScore) * 100;
-    
-    if (confluenceScore > 0.5) {
-      decision = 'STRONG BUY';
-    } else if (confluenceScore > 0.2) {
-      decision = 'BUY';
-    } else if (confluenceScore < -0.5) {
-      decision = 'STRONG SELL';
-    } else if (confluenceScore < -0.2) {
-      decision = 'SELL';
-    }
-    
-    return { signals, bullish, bearish, decision, confidence };
-  }, [volumeSignal, deltaSignal, orderFlowSignal, structureSignal, confluenceScore]);
-
-  const decisionText = weavePacket?.decision ?? systemReasoning.decision;
-  const decisionConfidence =
-    typeof weavePacket?.confidence === 'number' ? weavePacket.confidence : systemReasoning.confidence;
-  const decisionReasonText = weavePacket?.reason_text ?? '';
-
-  const getScoreColor = (score: number) => {
-    if (score > 0.5) return 'text-emerald-400';
-    if (score > 0) return 'text-emerald-300';
-    if (score < -0.5) return 'text-red-400';
-    if (score < 0) return 'text-red-300';
-    return 'text-slate-400';
-  };
-
-  const getDecisionColor = (decision: string) => {
-    if (decision.includes('TRADE') || decision.includes('BUY')) return 'from-emerald-500 to-cyan-500';
-    if (decision.includes('SELL') || decision.includes('SKIP')) return 'from-red-500 to-orange-500';
-    return 'from-slate-500 to-slate-600';
-  };
-
-  return (
-    <div className="h-full flex flex-col space-y-3 overflow-auto">
-      {/* UNIFIED BRAIN - The Central Intelligence */}
-      <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-xl p-4 border border-cyan-500/30 relative overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/5 to-purple-500/5" />
-        <div className="relative">
-          <div className="flex items-center justify-between mb-3">
-            <div className="flex items-center gap-2">
-              <Brain className="w-5 h-5 text-cyan-400" />
-              <span className="text-sm font-bold text-white">UNIFIED INTELLIGENCE</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <Sparkles className="w-4 h-4 text-yellow-400 animate-pulse" />
-              <span className="text-xs text-slate-400">{weavePacket ? 'WOVEN PACKET' : 'LOCAL HEURISTIC (Tier C)'}</span>
-            </div>
-          </div>
-          
-          {/* Central Decision Display */}
-          <div className={`text-center py-4 rounded-lg bg-gradient-to-r ${getDecisionColor(decisionText)} mb-3`}>
-            <div className="text-2xl font-black text-white tracking-wider">
-              {decisionText}
-            </div>
-            <div className="text-sm text-white/80">
-              Confidence: {decisionConfidence.toFixed(0)}%
-            </div>
-          </div>
-
-          {weavePacket && decisionReasonText && (
-            <div className="text-[11px] text-slate-300 mb-3 text-center">
-              {decisionReasonText}
-            </div>
-          )}
-          
-          {/* Confluence Score Bar */}
-          <div className="mb-3">
-            <div className="flex justify-between text-xs text-slate-400 mb-1">
-              <span>BEARISH</span>
-              <span>NEUTRAL</span>
-              <span>BULLISH</span>
-            </div>
-            <div className="h-3 bg-slate-700 rounded-full relative overflow-hidden">
-              <div className="absolute inset-0 flex">
-                <div className="w-1/2 bg-gradient-to-r from-red-500/30 to-transparent" />
-                <div className="w-1/2 bg-gradient-to-l from-emerald-500/30 to-transparent" />
-              </div>
-              <div 
-                className="absolute top-0 bottom-0 w-1 bg-white shadow-lg shadow-white/50 transition-all duration-500"
-                style={{ left: `${50 + confluenceScore * 50}%` }}
-              />
-            </div>
-            <div className="text-center text-xs text-slate-400 mt-1">
-              Score: {confluenceScore > 0 ? '+' : ''}{(confluenceScore * 100).toFixed(0)}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* NEURAL CONNECTIONS - How signals connect */}
-      <div className="bg-[#0f1420] rounded-xl p-3 border border-slate-700">
-        <div className="flex items-center gap-2 mb-3">
-          <Network className="w-4 h-4 text-purple-400" />
-          <span className="text-xs font-bold text-slate-300">SIGNAL CONFLUENCE</span>
-        </div>
-        
-        <div className="space-y-2">
-          {systemReasoning.signals.map((signal, idx) => (
-            <div key={idx} className="flex items-center gap-2">
-              <div className="w-20 text-xs text-slate-400 truncate">{signal.name}</div>
-              <div className="flex-1 h-2 bg-slate-800 rounded-full overflow-hidden relative">
-                <div 
-                  className={`absolute top-0 bottom-0 transition-all duration-500 ${
-                    signal.score > 0 ? 'bg-emerald-500 left-1/2' : 'bg-red-500 right-1/2'
-                  }`}
-                  style={{ width: `${Math.abs(signal.score) * 50}%` }}
-                />
-                <div className="absolute left-1/2 top-0 bottom-0 w-px bg-slate-600" />
-              </div>
-              <div className={`w-16 text-xs font-bold text-right ${getScoreColor(signal.score)}`}>
-                {signal.bias}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* REASONING NARRATIVE - Why the system thinks this */}
-      <div className="bg-[#0f1420] rounded-xl p-3 border border-slate-700 flex-1">
-        <div className="flex items-center gap-2 mb-2">
-          <Cpu className="w-4 h-4 text-cyan-400" />
-          <span className="text-xs font-bold text-slate-300">SYSTEM REASONING</span>
-        </div>
-        
-        <div className="space-y-2 text-xs">
-          {systemReasoning.signals.map((signal, idx) => (
-            <div key={idx} className={`p-2 rounded border-l-2 ${
-              signal.score > 0 ? 'border-emerald-500 bg-emerald-500/5' : 
-              signal.score < 0 ? 'border-red-500 bg-red-500/5' : 
-              'border-slate-500 bg-slate-500/5'
-            }`}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="font-bold text-slate-300">{signal.name}</span>
-                <span className={`text-xs ${getScoreColor(signal.score)}`}>
-                  {signal.weight}% weight
-                </span>
-              </div>
-              <div className="text-slate-400">{signal.reason}</div>
-            </div>
-          ))}
-        </div>
-        
-        {/* Final Synthesis */}
-        <div className="mt-3 p-2 rounded bg-gradient-to-r from-cyan-500/10 to-purple-500/10 border border-cyan-500/20">
-          <div className="text-xs text-slate-300">
-            <span className="font-bold text-cyan-400">SYNTHESIS: </span>
-            {systemReasoning.bullish.length} bullish signals ({systemReasoning.bullish.map(s => s.name).join(', ') || 'none'}) vs {systemReasoning.bearish.length} bearish signals ({systemReasoning.bearish.map(s => s.name).join(', ') || 'none'}).
-            <span className={`font-bold ml-1 ${
-              decisionText.includes('TRADE') || decisionText.includes('BUY') ? 'text-emerald-400' :
-              decisionText.includes('SELL') || decisionText.includes('SKIP') ? 'text-red-400' : 'text-slate-400'
-            }`}>
-              System recommends: {decisionText}
-            </span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// BREAKTHROUGH: PREDICTIVE TRADE SETUP - Actionable intelligence with specific levels
-const PredictiveTradeSetup = ({ 
-  volumeProfile, 
-  marketStructure, 
-  orderFlow,
-  delta,
-  currentPrice,
-  symbol
-}: { 
-  volumeProfile: VolumeProfile | null,
-  marketStructure: MarketStructure | null,
-  orderFlow: OrderFlowImbalance | null,
-  delta: DeltaPoint[],
-  currentPrice: number,
-  symbol: string
-}) => {
-  const decimals = symbol === 'XAUUSD' ? 2 : symbol === 'USDJPY' ? 3 : 5;
-  
-  // PREDICTIVE INTELLIGENCE: Calculate optimal trade setup
-  const tradeSetup = useMemo(() => {
-    if (!volumeProfile || !currentPrice) return null;
-    
-    // Analyze all signals for direction
-    let bullishScore = 0;
-    let bearishScore = 0;
-    const reasons: string[] = [];
-    
-    // Volume Profile Analysis
-    if (currentPrice > volumeProfile.vah) {
-      bullishScore += 30;
-      reasons.push('Price broke above Value Area - bullish breakout');
-    } else if (currentPrice < volumeProfile.val) {
-      bearishScore += 30;
-      reasons.push('Price broke below Value Area - bearish breakdown');
-    } else if (currentPrice > volumeProfile.poc) {
-      bullishScore += 15;
-      reasons.push('Price above POC - buyers defending');
-    } else {
-      bearishScore += 15;
-      reasons.push('Price below POC - sellers in control');
-    }
-    
-    // Delta Analysis
-    if (delta && delta.length > 0) {
-      const lastDelta = delta[delta.length - 1]?.cumulative_delta || 0;
-      const prevDelta = delta[Math.max(0, delta.length - 10)]?.cumulative_delta || 0;
-      const deltaTrend = lastDelta - prevDelta;
-      
-      if (deltaTrend > 2000) {
-        bullishScore += 35;
-        reasons.push('Strong delta divergence - institutional buying detected');
-      } else if (deltaTrend < -2000) {
-        bearishScore += 35;
-        reasons.push('Strong delta divergence - institutional selling detected');
-      } else if (deltaTrend > 500) {
-        bullishScore += 15;
-        reasons.push('Positive delta flow - buying pressure');
-      } else if (deltaTrend < -500) {
-        bearishScore += 15;
-        reasons.push('Negative delta flow - selling pressure');
-      }
-    }
-    
-    // Order Flow Analysis
-    if (orderFlow) {
-      if (orderFlow.ofi_normalized > 0.6) {
-        bullishScore += 25;
-        reasons.push('Heavy order flow imbalance - aggressive buyers');
-      } else if (orderFlow.ofi_normalized < -0.6) {
-        bearishScore += 25;
-        reasons.push('Heavy order flow imbalance - aggressive sellers');
-      }
-    }
-    
-    // Market Structure Analysis
-    if (marketStructure) {
-      if (marketStructure.structure === 'BULLISH') {
-        bullishScore += 20;
-        reasons.push('Higher highs and higher lows - uptrend confirmed');
-      } else if (marketStructure.structure === 'BEARISH') {
-        bearishScore += 20;
-        reasons.push('Lower highs and lower lows - downtrend confirmed');
-      }
-    }
-    
-    // Calculate confidence and direction
-    const totalScore = bullishScore + bearishScore;
-    const confidence = totalScore > 0 ? Math.max(bullishScore, bearishScore) : 0;
-    const direction = bullishScore > bearishScore ? 'LONG' : bearishScore > bullishScore ? 'SHORT' : 'NEUTRAL';
-    
-    // Calculate optimal entry, stop, and targets based on Volume Profile
-    let entry = currentPrice;
-    let stopLoss = 0;
-    let target1 = 0;
-    let target2 = 0;
-    
-    if (direction === 'LONG') {
-      entry = Math.min(currentPrice, volumeProfile.poc + (volumeProfile.vah - volumeProfile.poc) * 0.3);
-      stopLoss = volumeProfile.val - (volumeProfile.vah - volumeProfile.val) * 0.1;
-      target1 = volumeProfile.vah;
-      target2 = volumeProfile.vah + (volumeProfile.vah - volumeProfile.poc) * 0.5;
-    } else if (direction === 'SHORT') {
-      entry = Math.max(currentPrice, volumeProfile.poc - (volumeProfile.poc - volumeProfile.val) * 0.3);
-      stopLoss = volumeProfile.vah + (volumeProfile.vah - volumeProfile.val) * 0.1;
-      target1 = volumeProfile.val;
-      target2 = volumeProfile.val - (volumeProfile.poc - volumeProfile.val) * 0.5;
-    }
-    
-    const risk = Math.abs(entry - stopLoss);
-    const reward1 = Math.abs(target1 - entry);
-    const riskReward1 = risk > 0 ? reward1 / risk : 0;
-    
-    // Smart Money Detection
-    const smartMoneySignals: string[] = [];
-    if (delta && delta.length > 5) {
-      const recentDeltas = delta.slice(-5);
-      const avgDelta = recentDeltas.reduce((sum: number, d) => sum + Math.abs(d.delta || 0), 0) / 5;
-      if (avgDelta > 1000) {
-        smartMoneySignals.push('High volume activity - institutions active');
-      }
-    }
-    
-    if (volumeProfile.hvn_prices && volumeProfile.hvn_prices.length > 0) {
-      const nearHVN = volumeProfile.hvn_prices.some((hvn: number) => Math.abs(currentPrice - hvn) < (volumeProfile.vah - volumeProfile.val) * 0.1);
-      if (nearHVN) {
-        smartMoneySignals.push('Price at High Volume Node - potential support/resistance');
-      }
-    }
-    
-    return {
-      direction,
-      confidence,
-      entry,
-      stopLoss,
-      target1,
-      target2,
-      riskReward1,
-      reasons,
-      smartMoneySignals,
-      isHighProbability: confidence >= 60 && riskReward1 >= 1.5
-    };
-  }, [volumeProfile, marketStructure, orderFlow, delta, currentPrice]);
-  
-  if (!tradeSetup || tradeSetup.direction === 'NEUTRAL') {
-    return (
-      <div className="h-full flex flex-col items-center justify-center text-slate-500 p-4">
-        <Eye className="w-8 h-8 mb-2 opacity-50" />
-        <div className="text-sm font-medium">Analyzing Market...</div>
-        <div className="text-xs mt-1">Waiting for high probability setup</div>
-      </div>
-    );
-  }
-  
-  const isLong = tradeSetup.direction === 'LONG';
-  const directionIcon = isLong ? <TrendingUp className="w-5 h-5" /> : <TrendingDown className="w-5 h-5" />;
-  
-  return (
-    <div className="h-full flex flex-col space-y-2 overflow-auto p-1">
-      {/* TRADE SIGNAL HEADER */}
-      <div className={`bg-gradient-to-r ${isLong ? 'from-emerald-500/20 to-cyan-500/20 border-emerald-500/50' : 'from-red-500/20 to-orange-500/20 border-red-500/50'} rounded-lg p-3 border`}>
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className={`p-2 rounded-lg ${isLong ? 'bg-emerald-500' : 'bg-red-500'}`}>
-              {directionIcon}
-            </div>
-            <div>
-              <div className={`text-lg font-black ${isLong ? 'text-emerald-400' : 'text-red-400'}`}>
-                {tradeSetup.direction}
-              </div>
-              <div className="text-xs text-slate-400">
-                {tradeSetup.isHighProbability ? 'HIGH PROBABILITY' : 'MODERATE'} SETUP
-              </div>
-            </div>
-          </div>
-          <div className="text-right">
-            <div className={`text-2xl font-black ${isLong ? 'text-emerald-400' : 'text-red-400'}`}>
-              {tradeSetup.confidence}%
-            </div>
-            <div className="text-xs text-slate-400">Confidence</div>
-          </div>
-        </div>
-      </div>
-      
-      {/* TRADE LEVELS */}
-      <div className="bg-[#0f1420] rounded-lg p-3 border border-slate-700">
-        <div className="flex items-center gap-2 mb-3">
-          <Target className="w-4 h-4 text-cyan-400" />
-          <span className="text-xs font-bold text-slate-300">TRADE LEVELS</span>
-        </div>
-        
-        <div className="space-y-2">
-          <div className="flex items-center justify-between p-2 rounded bg-slate-800/50">
-            <div className="flex items-center gap-2">
-              <Crosshair className="w-4 h-4 text-cyan-400" />
-              <span className="text-xs text-slate-300">Entry</span>
-            </div>
-            <span className="text-sm font-bold text-cyan-400">{tradeSetup.entry.toFixed(decimals)}</span>
-          </div>
-          
-          <div className="flex items-center justify-between p-2 rounded bg-red-500/10 border border-red-500/30">
-            <div className="flex items-center gap-2">
-              <Shield className="w-4 h-4 text-red-400" />
-              <span className="text-xs text-slate-300">Stop Loss</span>
-            </div>
-            <span className="text-sm font-bold text-red-400">{tradeSetup.stopLoss.toFixed(decimals)}</span>
-          </div>
-          
-          <div className="flex items-center justify-between p-2 rounded bg-emerald-500/10 border border-emerald-500/30">
-            <div className="flex items-center gap-2">
-              <Target className="w-4 h-4 text-emerald-400" />
-              <span className="text-xs text-slate-300">Target 1</span>
-            </div>
-            <div className="text-right">
-              <span className="text-sm font-bold text-emerald-400">{tradeSetup.target1.toFixed(decimals)}</span>
-              <span className="text-xs text-slate-500 ml-2">R:R {tradeSetup.riskReward1.toFixed(1)}</span>
-            </div>
-          </div>
-        </div>
-      </div>
-      
-      {/* SMART MONEY SIGNALS */}
-      {tradeSetup.smartMoneySignals.length > 0 && (
-        <div className="bg-[#0f1420] rounded-lg p-3 border border-yellow-500/30">
-          <div className="flex items-center gap-2 mb-2">
-            <Zap className="w-4 h-4 text-yellow-400" />
-            <span className="text-xs font-bold text-yellow-400">SMART MONEY DETECTED</span>
-          </div>
-          <div className="space-y-1">
-            {tradeSetup.smartMoneySignals.map((signal, idx) => (
-              <div key={idx} className="text-xs text-slate-300 flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-yellow-400" />
-                {signal}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-      
-      {/* REASONING */}
-      <div className="bg-[#0f1420] rounded-lg p-3 border border-slate-700 flex-1">
-        <div className="flex items-center gap-2 mb-2">
-          <Brain className="w-4 h-4 text-purple-400" />
-          <span className="text-xs font-bold text-slate-300">WHY THIS TRADE</span>
-        </div>
-        <div className="space-y-1">
-          {tradeSetup.reasons.slice(0, 4).map((reason, idx) => (
-            <div key={idx} className={`text-xs p-1.5 rounded ${isLong ? 'bg-emerald-500/5 border-l-2 border-emerald-500' : 'bg-red-500/5 border-l-2 border-red-500'}`}>
-              {reason}
-            </div>
-          ))}
-        </div>
-      </div>
-      
-      {/* NARRATIVE */}
-      <div className={`p-3 rounded-lg ${isLong ? 'bg-emerald-500/10 border border-emerald-500/30' : 'bg-red-500/10 border border-red-500/30'}`}>
-        <div className="text-xs text-slate-300 leading-relaxed">
-          <span className={`font-bold ${isLong ? 'text-emerald-400' : 'text-red-400'}`}>NARRATIVE: </span>
-          {isLong 
-            ? `Institutional buying detected with ${tradeSetup.confidence}% confidence. Enter LONG at ${tradeSetup.entry.toFixed(decimals)} with stop at ${tradeSetup.stopLoss.toFixed(decimals)}. Target ${tradeSetup.target1.toFixed(decimals)} for ${tradeSetup.riskReward1.toFixed(1)}R.`
-            : `Institutional selling detected with ${tradeSetup.confidence}% confidence. Enter SHORT at ${tradeSetup.entry.toFixed(decimals)} with stop at ${tradeSetup.stopLoss.toFixed(decimals)}. Target ${tradeSetup.target1.toFixed(decimals)} for ${tradeSetup.riskReward1.toFixed(1)}R.`
-          }
-        </div>
-      </div>
-    </div>
-  );
-};
-
-// UNPUSHABLE BREAKTHROUGH: Multi-Timeframe Confluence Indicator
-const MultiTimeframeConfluence = ({ 
-  volumeProfile, 
-  marketStructure, 
-  delta,
-  currentPrice 
-}: { 
-  volumeProfile: VolumeProfile | null,
-  marketStructure: MarketStructure | null,
-  delta: DeltaPoint[],
-  currentPrice: number
-}) => {
-  // Simulate multi-timeframe analysis (in production, this would fetch data from different timeframes)
-  const timeframes = useMemo(() => {
-    if (!volumeProfile || !currentPrice) return [];
-    
-    // Calculate bias for each timeframe based on available data
-    const calcBias = (priceOffset: number, deltaMultiplier: number) => {
-      const adjustedPrice = currentPrice * (1 + priceOffset);
-      let bullish = 0;
-      let bearish = 0;
-      
-      // Volume Profile bias
-      if (adjustedPrice > volumeProfile.vah) bullish += 40;
-      else if (adjustedPrice < volumeProfile.val) bearish += 40;
-      else if (adjustedPrice > volumeProfile.poc) bullish += 20;
-      else bearish += 20;
-      
-      // Delta bias
-      if (delta && delta.length > 0) {
-        const lastDelta = delta[delta.length - 1]?.cumulative_delta || 0;
-        if (lastDelta * deltaMultiplier > 1000) bullish += 30;
-        else if (lastDelta * deltaMultiplier < -1000) bearish += 30;
-      }
-      
-      // Structure bias
-      if (marketStructure) {
-        if (marketStructure.structure === 'BULLISH') bullish += 30;
-        else if (marketStructure.structure === 'BEARISH') bearish += 30;
-      }
-      
-      return { bullish, bearish, bias: bullish > bearish ? 'BULL' : bearish > bullish ? 'BEAR' : 'NEUT' };
-    };
-    
-    return [
-      { name: '1H', ...calcBias(0, 1) },
-      { name: '4H', ...calcBias(0.001, 1.5) },
-      { name: 'D', ...calcBias(0.002, 2) },
-      { name: 'W', ...calcBias(0.003, 2.5) },
-    ];
-  }, [volumeProfile, marketStructure, delta, currentPrice]);
-  
-  const bullishCount = timeframes.filter(tf => tf.bias === 'BULL').length;
-  const bearishCount = timeframes.filter(tf => tf.bias === 'BEAR').length;
-  const confluenceLevel = Math.max(bullishCount, bearishCount);
-  const overallBias = bullishCount > bearishCount ? 'BULLISH' : bearishCount > bullishCount ? 'BEARISH' : 'NEUTRAL';
-  
-  const getBiasColor = (bias: string) => {
-    if (bias === 'BULL') return 'text-emerald-400 bg-emerald-500/20 border-emerald-500/50';
-    if (bias === 'BEAR') return 'text-red-400 bg-red-500/20 border-red-500/50';
-    return 'text-slate-400 bg-slate-500/20 border-slate-500/50';
-  };
-  
-  const getConfluenceColor = () => {
-    if (confluenceLevel >= 4) return 'from-emerald-500 to-cyan-500';
-    if (confluenceLevel >= 3) return 'from-emerald-500/70 to-cyan-500/70';
-    if (confluenceLevel >= 2) return 'from-yellow-500 to-orange-500';
-    return 'from-slate-500 to-slate-600';
-  };
-  
-  return (
-    <div className="h-full flex flex-col space-y-2 p-1">
-      {/* CONFLUENCE HEADER */}
-      <div className={`bg-gradient-to-r ${getConfluenceColor()} rounded-lg p-2 text-center`}>
-        <div className="text-white font-black text-sm">
-          {confluenceLevel}/4 TIMEFRAMES {overallBias}
-        </div>
-        <div className="text-white/80 text-xs">
-          {confluenceLevel >= 4 ? 'SUPER CONFLUENCE - HIGH PROBABILITY' : 
-           confluenceLevel >= 3 ? 'STRONG CONFLUENCE' : 
-           confluenceLevel >= 2 ? 'MODERATE CONFLUENCE' : 'WEAK CONFLUENCE'}
-        </div>
-      </div>
-      
-      {/* TIMEFRAME GRID */}
-      <div className="grid grid-cols-4 gap-1 flex-1">
-        {timeframes.map((tf, idx) => (
-          <div key={idx} className={`rounded-lg border p-2 text-center ${getBiasColor(tf.bias)}`}>
-            <div className="font-bold text-xs">{tf.name}</div>
-            <div className="text-lg font-black">
-              {tf.bias === 'BULL' ? <TrendingUp className="w-4 h-4 mx-auto" /> : 
-               tf.bias === 'BEAR' ? <TrendingDown className="w-4 h-4 mx-auto" /> : 
-               <Activity className="w-4 h-4 mx-auto" />}
-            </div>
-            <div className="text-[10px] opacity-80">{tf.bias}</div>
-          </div>
-        ))}
-      </div>
-      
-      {/* CONFLUENCE EXPLANATION */}
-      <div className="bg-slate-800/50 rounded-lg p-2 text-xs text-slate-300">
-        <span className="font-bold text-cyan-400">CONFLUENCE: </span>
-        {confluenceLevel >= 4 ? 
-          `All 4 timeframes agree on ${overallBias} bias. This is a SUPER HIGH PROBABILITY setup.` :
-         confluenceLevel >= 3 ?
-          `3/4 timeframes show ${overallBias} bias. Strong setup with good probability.` :
-         confluenceLevel >= 2 ?
-          `Only 2/4 timeframes agree. Wait for more confluence before entering.` :
-          `Timeframes are conflicting. AVOID trading until confluence improves.`
-        }
-      </div>
-    </div>
-  );
-};
-
-// UNPUSHABLE BREAKTHROUGH: Historical Accuracy Tracker
-const HistoricalAccuracyTracker = ({ closedTrades }: { closedTrades: ClosedTrade[] }) => {
-  const stats = useMemo(() => {
-    if (!closedTrades || closedTrades.length === 0) {
-      return { winRate: 0, avgRR: 0, profitFactor: 0, streak: 0, last10: [] };
-    }
-    
-    const wins = closedTrades.filter(t => t.pnl > 0).length;
-    const losses = closedTrades.filter(t => t.pnl < 0).length;
-    const winRate = closedTrades.length > 0 ? (wins / closedTrades.length) * 100 : 0;
-    
-    const totalWins = closedTrades.filter(t => t.pnl > 0).reduce((sum, t) => sum + t.pnl, 0);
-    const totalLosses = Math.abs(closedTrades.filter(t => t.pnl < 0).reduce((sum, t) => sum + t.pnl, 0));
-    const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? 999 : 0;
-    
-    // Calculate current streak
-    let streak = 0;
-    for (let i = closedTrades.length - 1; i >= 0; i--) {
-      if (i === closedTrades.length - 1) {
-        streak = closedTrades[i].pnl > 0 ? 1 : -1;
-      } else {
-        if ((streak > 0 && closedTrades[i].pnl > 0) || (streak < 0 && closedTrades[i].pnl < 0)) {
-          streak = streak > 0 ? streak + 1 : streak - 1;
-        } else {
-          break;
-        }
-      }
-    }
-    
-    const last10 = closedTrades.slice(-10).map(t => t.pnl > 0);
-    
-    return { winRate, profitFactor, streak, last10, wins, losses };
-  }, [closedTrades]);
-  
-  return (
-    <div className="h-full flex flex-col space-y-2 p-1">
-      {/* ACCURACY HEADER */}
-      <div className={`bg-gradient-to-r ${stats.winRate >= 70 ? 'from-emerald-500 to-cyan-500' : stats.winRate >= 50 ? 'from-yellow-500 to-orange-500' : 'from-red-500 to-pink-500'} rounded-lg p-2 text-center`}>
-        <div className="text-white font-black text-lg">{stats.winRate.toFixed(1)}%</div>
-        <div className="text-white/80 text-xs">HISTORICAL WIN RATE</div>
-      </div>
-      
-      {/* STATS GRID */}
-      <div className="grid grid-cols-3 gap-1">
-        <div className="bg-slate-800/50 rounded-lg p-2 text-center">
-          <div className="text-emerald-400 font-bold text-sm">{stats.wins || 0}</div>
-          <div className="text-slate-500 text-[10px]">WINS</div>
-        </div>
-        <div className="bg-slate-800/50 rounded-lg p-2 text-center">
-          <div className="text-red-400 font-bold text-sm">{stats.losses || 0}</div>
-          <div className="text-slate-500 text-[10px]">LOSSES</div>
-        </div>
-        <div className="bg-slate-800/50 rounded-lg p-2 text-center">
-          <div className="text-cyan-400 font-bold text-sm">{stats.profitFactor.toFixed(2)}</div>
-          <div className="text-slate-500 text-[10px]">PROFIT FACTOR</div>
-        </div>
-      </div>
-      
-      {/* LAST 10 TRADES VISUAL */}
-      <div className="bg-slate-800/30 rounded-lg p-2">
-        <div className="text-xs text-slate-400 mb-1">Last 10 Signals:</div>
-        <div className="flex gap-1 justify-center">
-          {stats.last10.map((win, idx) => (
-            <div 
-              key={idx} 
-              className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${win ? 'bg-emerald-500 text-white' : 'bg-red-500 text-white'}`}
-            >
-              {win ? 'W' : 'L'}
-            </div>
-          ))}
-          {stats.last10.length === 0 && <span className="text-slate-500 text-xs">No trades yet</span>}
-        </div>
-      </div>
-      
-      {/* STREAK INDICATOR */}
-      <div className={`rounded-lg p-2 text-center ${stats.streak > 0 ? 'bg-emerald-500/20 border border-emerald-500/50' : stats.streak < 0 ? 'bg-red-500/20 border border-red-500/50' : 'bg-slate-500/20'}`}>
-        <div className={`font-bold text-sm ${stats.streak > 0 ? 'text-emerald-400' : stats.streak < 0 ? 'text-red-400' : 'text-slate-400'}`}>
-          {stats.streak > 0 ? `${stats.streak} WIN STREAK` : stats.streak < 0 ? `${Math.abs(stats.streak)} LOSS STREAK` : 'NO STREAK'}
-        </div>
-      </div>
-      
-      {/* CONFIDENCE MESSAGE */}
-      <div className="bg-slate-800/50 rounded-lg p-2 text-xs text-slate-300">
-        <span className="font-bold text-cyan-400">TRACK RECORD: </span>
-        {stats.winRate >= 70 ? 
-          'System is performing excellently. High confidence in signals.' :
-         stats.winRate >= 50 ?
-          'System is profitable. Signals are reliable.' :
-          'System needs optimization. Trade with caution.'
-        }
-      </div>
-    </div>
-  );
-};
-
-const DeltaProfileChart = ({ data, symbol }: { data: VolumeProfile | null, symbol: string }) => {
-  if (!data || !data.levels || data.levels.length === 0) {
-    return (
-      <div className="h-full flex items-center justify-center text-slate-500">
-        <Activity className="w-6 h-6 animate-pulse mr-2" />
-        Loading Delta Profile...
-      </div>
-    );
-  }
-
-  const decimals = symbol === 'XAUUSD' ? 2 : symbol === 'USDJPY' ? 3 : 5;
-  const maxDelta = Math.max(...data.levels.map(l => Math.abs(l.delta)));
-
-  return (
-    <div className="h-full flex flex-col">
-      <div className="text-xs text-slate-400 mb-2 flex justify-between">
-        <span className="text-emerald-400">Buying Pressure</span>
-        <span className="text-red-400">Selling Pressure</span>
-      </div>
-      <div className="flex-1 flex flex-col-reverse gap-px overflow-hidden">
-        {data.levels.map((level, idx) => {
-          const deltaWidth = maxDelta > 0 ? (Math.abs(level.delta) / maxDelta) * 50 : 0;
-          const isBuying = level.delta > 0;
-          
-          return (
-            <div key={idx} className="flex-1 flex items-center group relative min-h-1">
-              {/* Price label on hover */}
-              <div className="absolute left-1/2 -translate-x-1/2 hidden group-hover:block bg-slate-900 border border-slate-600 rounded px-2 py-1 text-xs z-20 whitespace-nowrap">
-                {level.price_mid.toFixed(decimals)} | Delta: {level.delta > 0 ? '+' : ''}{level.delta.toFixed(0)}
-              </div>
-              
-              {/* Left side - Selling (red) */}
-              <div className="w-1/2 flex justify-end pr-1">
-                {!isBuying && (
-                  <div 
-                    className="h-full bg-gradient-to-l from-red-500 to-red-600 rounded-l transition-all"
-                    style={{ width: `${deltaWidth}%` }}
-                  />
-                )}
-              </div>
-              
-              {/* Center line */}
-              <div className="w-px h-full bg-slate-600" />
-              
-              {/* Right side - Buying (green) */}
-              <div className="w-1/2 flex justify-start pl-1">
-                {isBuying && (
-                  <div 
-                    className="h-full bg-gradient-to-r from-emerald-500 to-emerald-600 rounded-r transition-all"
-                    style={{ width: `${deltaWidth}%` }}
-                  />
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="text-xs text-slate-500 mt-2 text-center">
-        POC: {data.poc.toFixed(decimals)} | VAH: {data.vah.toFixed(decimals)} | VAL: {data.val.toFixed(decimals)}
-      </div>
-    </div>
-  );
-};
-
+}
 
 function App() {
-  const [state, setState] = useState<TradingState | null>(null);
-  const [performance, setPerformance] = useState<Performance | null>(null);
-  const [chartData, setChartData] = useState<ChartData | null>(null);
-  const [weavePacket, setWeavePacket] = useState<WeavePacket | null>(null);
-  const [provenanceStatus, setProvenanceStatus] = useState<ProvenanceStatus | null>(null);
-  const [selectedPin, setSelectedPin] = useState<EvidencePin | null>(null);
-  const [selectedSymbol, setSelectedSymbol] = useState('EURUSD');
-  const [prices, setPrices] = useState<Record<string, number>>({});
-  const [isConnected, setIsConnected] = useState(false);
-  const [activeTab, setActiveTab] = useState<'brain' | 'setup' | 'mtf' | 'accuracy' | 'orderflow' | 'levels' | 'risk'>('brain');
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-
-  const symbols = ['BTCUSDT', 'ETHUSDT', 'EURUSD', 'GBPUSD', 'USDJPY', 'AUDUSD', 'XAUUSD'];
-  const decimals =
-    selectedSymbol === 'XAUUSD' ? 2 :
-    selectedSymbol === 'USDJPY' ? 3 :
-    selectedSymbol.endsWith('USDT') ? 2 :
-    5;
-
-  const fetchData = useCallback(async () => {
-    try {
-      const [stateRes, perfRes, pricesRes, chartRes, weaveRes, provRes] = await Promise.all([
-        fetch(`${API_URL}/api/state`),
-        fetch(`${API_URL}/api/performance`),
-        fetch(`${API_URL}/api/prices`),
-        fetch(`${API_URL}/api/chart-data/${selectedSymbol}?bars=100`),
-        fetch(`${API_URL}/api/weave-packet/${selectedSymbol}`),
-        fetch(`${API_URL}/api/provenance/status`),
-      ]);
-
-      if (stateRes.ok) setState(await stateRes.json());
-      if (perfRes.ok) setPerformance(await perfRes.json());
-      if (pricesRes.ok) setPrices(await pricesRes.json());
-      if (chartRes.ok) {
-        const data = (await chartRes.json()) as Partial<ChartData>;
-        if (Array.isArray(data.delta)) {
-          data.delta = data.delta.map((d, i) => ({ ...d, idx: i }));
-        }
-        setChartData(data as ChartData);
-      }
-      if (weaveRes.ok) {
-        const wp = (await weaveRes.json()) as { packet?: WeavePacket | null };
-        setWeavePacket(wp.packet ?? null);
-      } else {
-        setWeavePacket(null);
-      }
-      if (provRes.ok) {
-        setProvenanceStatus((await provRes.json()) as ProvenanceStatus);
-      }
-      setIsConnected(true);
-      setLastUpdate(new Date());
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      setIsConnected(false);
-    }
-  }, [selectedSymbol]);
-
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 5000);
-    return () => clearInterval(interval);
-  }, [fetchData]);
-
-  useEffect(() => {
-    setSelectedPin(null);
-  }, [selectedSymbol]);
-
-  const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat('en-US', {
-      style: 'currency',
-      currency: 'USD',
-      minimumFractionDigits: 2
-    }).format(value);
-  };
-
-  const formatPercent = (value: number) => `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
-
-  const getRegimeColor = (regime: string) => {
-    switch (regime?.toUpperCase()) {
-      case 'TRENDING': return 'text-emerald-400 bg-emerald-500/20';
-      case 'RANGING': return 'text-amber-400 bg-amber-500/20';
-      case 'VOLATILE': return 'text-red-400 bg-red-500/20';
-      default: return 'text-slate-400 bg-slate-500/20';
-    }
-  };
-
-  const getStructureIcon = (structure: string) => {
-    if (structure === 'BULLISH') return <TrendingUp className="w-4 h-4 text-emerald-400" />;
-    if (structure === 'BEARISH') return <TrendingDown className="w-4 h-4 text-red-400" />;
-    return <Activity className="w-4 h-4 text-amber-400" />;
-  };
-
-  const wovenDecision = useMemo<UnifiedDecision | null>(() => {
-    if (!weavePacket) return null;
-    return {
-      decision: weavePacket.decision,
-      confidence: weavePacket.confidence,
-      signals: [],
-    };
-  }, [weavePacket]);
-
-  const highlight = useMemo(() => {
-    if (!selectedPin) {
-      return { bars: [] as number[], zone: null as EvidencePin["zone"], color: undefined as string | undefined };
-    }
-    const color =
-      selectedPin.severity >= 3 ? '#ef4444' :
-      selectedPin.severity === 2 ? '#f59e0b' :
-      '#06b6d4';
-    return { bars: selectedPin.bar_indices || [], zone: selectedPin.zone || null, color };
-  }, [selectedPin]);
-
-  const highlightedBars = useMemo(() => {
-    const abs = highlight.bars;
-    if (!weavePacket || !chartData || abs.length === 0) return [];
-    const n = chartData.candles.length;
-    if (n <= 0) return [];
-    const lastAbs = weavePacket.bar_index;
-    const firstAbs = lastAbs - (n - 1);
-    return abs
-      .map((i) => i - firstAbs)
-      .filter((i) => i >= 0 && i < n);
-  }, [highlight.bars, weavePacket, chartData]);
-
-  const isNoTrade = !!weavePacket && weavePacket.decision !== 'TRADE';
-  const domHealth = provenanceStatus?.dom_status?.providers?.[selectedSymbol];
-
-  const startRealDom = useCallback(async () => {
-    try {
-      await fetch(`${API_URL}/api/real-dom/start/${selectedSymbol}`, { method: 'POST' });
-      // Force-refresh status immediately after start.
-      fetchData();
-    } catch (e) {
-      console.error('Failed to start real DOM:', e);
-    }
-  }, [selectedSymbol, fetchData]);
-
-  return (
-    <div className="min-h-screen bg-[#0a0e17] text-white">
-      <header className="bg-[#0f1420] border-b border-slate-800 px-6 py-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <div className="w-10 h-10 bg-gradient-to-br from-cyan-500 to-purple-600 rounded-xl flex items-center justify-center">
-                <Brain className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-cyan-400 to-purple-400 bg-clip-text text-transparent">
-                  OMEGA-DEVIN
-                </h1>
-                <p className="text-xs text-slate-500">Institutional Trading Platform</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center gap-1 ml-8 bg-slate-800/50 rounded-lg p-1">
-              {symbols.map(symbol => (
-                <button
-                  key={symbol}
-                  onClick={() => setSelectedSymbol(symbol)}
-                  className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
-                    selectedSymbol === symbol 
-                      ? 'bg-gradient-to-r from-cyan-500 to-purple-500 text-white shadow-lg' 
-                      : 'text-slate-400 hover:text-white hover:bg-slate-700/50'
-                  }`}
-                >
-                  {symbol}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex items-center gap-6">
-            <div className="text-right">
-              <div className="text-2xl font-mono font-bold text-white">
-                {prices[selectedSymbol]?.toFixed(decimals) || '---'}
-              </div>
-              <div className="text-xs text-slate-500">Current Price</div>
-            </div>
-
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${isConnected ? 'bg-emerald-500/20' : 'bg-red-500/20'}`}>
-              <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
-              <span className={`text-xs font-medium ${isConnected ? 'text-emerald-400' : 'text-red-400'}`}>
-                {isConnected ? 'LIVE' : 'OFFLINE'}
-              </span>
-            </div>
-
-            <div
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${
-                !domHealth ? 'bg-slate-500/15' :
-                !domHealth.is_real ? 'bg-slate-500/15' :
-                domHealth.state === 'CONNECTED' ? 'bg-emerald-500/20' :
-                domHealth.state === 'CONNECTING' ? 'bg-amber-500/20' :
-                domHealth.state === 'STALE' ? 'bg-orange-500/20' :
-                'bg-red-500/20'
-              }`}
-              title={domHealth ? `Provider: ${domHealth.provider} | State: ${domHealth.state}` : 'No DOM status yet'}
-            >
-              <div
-                className={`w-2 h-2 rounded-full ${
-                  !domHealth ? 'bg-slate-500' :
-                  !domHealth.is_real ? 'bg-slate-500' :
-                  domHealth.state === 'CONNECTED' ? 'bg-emerald-500' :
-                  domHealth.state === 'CONNECTING' ? 'bg-amber-500' :
-                  domHealth.state === 'STALE' ? 'bg-orange-500' :
-                  'bg-red-500'
-                }`}
-              />
-              <span className="text-xs font-medium text-slate-200">
-                DOM
-              </span>
-              <span className={`text-xs font-medium ${
-                !domHealth ? 'text-slate-400' :
-                !domHealth.is_real ? 'text-slate-400' :
-                domHealth.state === 'CONNECTED' ? 'text-emerald-400' :
-                domHealth.state === 'CONNECTING' ? 'text-amber-400' :
-                domHealth.state === 'STALE' ? 'text-orange-400' :
-                'text-red-400'
-              }`}>
-                {domHealth ? (domHealth.is_real ? domHealth.state : 'SYNTHETIC') : '---'}
-              </span>
-              {domHealth?.is_real && domHealth.warmup_required > 0 && domHealth.state !== 'CONNECTED' && (
-                <span className="text-[10px] text-slate-400">
-                  {domHealth.consecutive_valid_snapshots}/{domHealth.warmup_required}
-                </span>
-              )}
-              {selectedSymbol.endsWith('USDT') && (
-                <button
-                  onClick={startRealDom}
-                  className="ml-1 px-2 py-0.5 rounded bg-slate-800/60 border border-slate-700 text-[10px] text-slate-200 hover:bg-slate-700/60"
-                  title="Start REAL DOM feed (requires server REAL_DOM=true)"
-                >
-                  Start L2
-                </button>
-              )}
-            </div>
-
-            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full ${state?.kill_switch_active ? 'bg-red-500/20' : 'bg-emerald-500/20'}`}>
-              <Shield className={`w-4 h-4 ${state?.kill_switch_active ? 'text-red-400' : 'text-emerald-400'}`} />
-              <span className={`text-xs font-medium ${state?.kill_switch_active ? 'text-red-400' : 'text-emerald-400'}`}>
-                {state?.kill_switch_active ? 'HALTED' : 'ACTIVE'}
-              </span>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="p-4 grid grid-cols-12 gap-4" style={{ height: 'calc(100vh - 80px)' }}>
-        
-        <div className="col-span-2 space-y-4">
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-            <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-              <DollarSign className="w-4 h-4" /> Account
-            </h3>
-            <div className="space-y-3">
-              <div>
-                <div className="text-xs text-slate-500">Capital</div>
-                <div className="text-xl font-mono font-bold text-white">{formatCurrency(state?.capital || 10000)}</div>
-              </div>
-              <div>
-                <div className="text-xs text-slate-500">Total P&L</div>
-                <div className={`text-lg font-mono font-bold ${(state?.total_pnl || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {formatCurrency(state?.total_pnl || 0)}
-                  <span className="text-xs ml-1">({formatPercent(state?.total_pnl_pct || 0)})</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-            <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-              <BarChart3 className="w-4 h-4" /> Performance
-            </h3>
-            <div className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-500">Win Rate</span>
-                <span className="text-sm font-mono font-bold text-emerald-400">
-                  {((performance?.win_rate || 0) * 100).toFixed(1)}%
-                </span>
-              </div>
-              <div className="h-2 bg-slate-800 rounded-full overflow-hidden">
-                <div 
-                  className="h-full bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-full"
-                  style={{ width: `${(performance?.win_rate || 0) * 100}%` }}
-                />
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-500">Profit Factor</span>
-                <span className="text-sm font-mono font-bold text-cyan-400">
-                  {(performance?.profit_factor || 0).toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-500">Total Trades</span>
-                <span className="text-sm font-mono text-white">{performance?.total_trades || 0}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-xs text-slate-500">Avg Trade</span>
-                <span className={`text-sm font-mono ${(performance?.avg_trade || 0) >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                  {formatCurrency(performance?.avg_trade || 0)}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-            <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-              <Layers className="w-4 h-4" /> Market Structure
-            </h3>
-            <div className="space-y-3">
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Structure</span>
-                <div className="flex items-center gap-1">
-                  {getStructureIcon(chartData?.market_structure?.structure || '')}
-                  <span className={`text-sm font-bold ${
-                    chartData?.market_structure?.structure === 'BULLISH' ? 'text-emerald-400' :
-                    chartData?.market_structure?.structure === 'BEARISH' ? 'text-red-400' : 'text-amber-400'
-                  }`}>
-                    {chartData?.market_structure?.structure || 'UNKNOWN'}
-                  </span>
-                </div>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Trend</span>
-                <span className={`text-sm font-medium px-2 py-0.5 rounded ${getRegimeColor(chartData?.market_structure?.trend || '')}`}>
-                  {chartData?.market_structure?.trend || 'NEUTRAL'}
-                </span>
-              </div>
-              <div className="flex items-center justify-between">
-                <span className="text-xs text-slate-500">Regime</span>
-                <span className={`text-sm font-medium px-2 py-0.5 rounded ${getRegimeColor(state?.regime || '')}`}>
-                  {state?.regime || 'NEUTRAL'}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="col-span-7 space-y-4">
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4" style={{ height: '45%' }}>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-slate-400 flex items-center gap-2">
-                <Activity className="w-4 h-4" /> {selectedSymbol} Price Chart with VWAP
-              </h3>
-              <div className="flex items-center gap-4 text-xs">
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-0.5 bg-purple-500" />
-                  <span className="text-slate-500">VWAP</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 bg-emerald-500 rounded-sm" />
-                  <span className="text-slate-500">Bullish</span>
-                </div>
-                <div className="flex items-center gap-1">
-                  <div className="w-3 h-3 bg-red-500 rounded-sm" />
-                  <span className="text-slate-500">Bearish</span>
-                </div>
-              </div>
-            </div>
-	            <div className="h-[calc(100%-30px)] relative">
-                                                        <CandlestickChart 
-                                                          candles={chartData?.candles || []} 
-                                                          vwap={chartData?.vwap || []} 
-                                                          symbol={selectedSymbol}
-                                                          volumeProfile={chartData?.volume_profile}
-                                                          liquiditySweeps={chartData?.liquidity_sweeps}
-                                                          marketStructure={chartData?.market_structure}
-                                                          unifiedDecision={wovenDecision || (() => {
-                                                            // Calculate unified decision for chart display
-                                                            const vp = chartData?.volume_profile;
-                                                            const of = chartData?.order_flow_imbalance;
-                                                            const ms = chartData?.market_structure;
-                                                            const delta = chartData?.delta || [];
-                                                            const price = chartData?.current_price || 0;
-                                
-                                                            let score = 0;
-                                                            const signals: UnifiedSignal[] = [];
-                                
-                                                            // Volume Profile signal
-                                                            if (vp) {
-                                                              if (price > vp.vah) { score += 0.8 * 0.25; signals.push({ name: 'VP', bias: 'BULL' }); }
-                                                              else if (price < vp.val) { score -= 0.8 * 0.25; signals.push({ name: 'VP', bias: 'BEAR' }); }
-                                                              else if (price > vp.poc) { score += 0.3 * 0.25; signals.push({ name: 'VP', bias: 'BULL' }); }
-                                                              else { score -= 0.3 * 0.25; signals.push({ name: 'VP', bias: 'BEAR' }); }
-                                                            }
-                                
-                                                            // Delta signal
-                                                            if (delta.length > 0) {
-                                                              const lastDelta = delta[delta.length - 1]?.cumulative_delta || 0;
-                                                              const prevDelta = delta[Math.max(0, delta.length - 10)]?.cumulative_delta || 0;
-                                                              const trend = lastDelta - prevDelta;
-                                                              if (trend > 1000) { score += 0.9 * 0.30; signals.push({ name: 'Delta', bias: 'BULL' }); }
-                                                              else if (trend < -1000) { score -= 0.9 * 0.30; signals.push({ name: 'Delta', bias: 'BEAR' }); }
-                                                              else if (trend > 0) { score += 0.4 * 0.30; signals.push({ name: 'Delta', bias: 'BULL' }); }
-                                                              else { score -= 0.4 * 0.30; signals.push({ name: 'Delta', bias: 'BEAR' }); }
-                                                            }
-                                
-                                                            // Order Flow signal
-                                                            if (of) {
-                                                              const ofi = of.ofi_normalized;
-                                                              if (ofi > 0.5) { score += 0.85 * 0.25; signals.push({ name: 'OFI', bias: 'BULL' }); }
-                                                              else if (ofi < -0.5) { score -= 0.85 * 0.25; signals.push({ name: 'OFI', bias: 'BEAR' }); }
-                                                              else { signals.push({ name: 'OFI', bias: 'NEUT' }); }
-                                                            }
-                                
-                                                            // Structure signal
-                                                            if (ms) {
-                                                              if (ms.structure === 'BULLISH') { score += 0.7 * 0.20; signals.push({ name: 'Struct', bias: 'BULL' }); }
-                                                              else if (ms.structure === 'BEARISH') { score -= 0.7 * 0.20; signals.push({ name: 'Struct', bias: 'BEAR' }); }
-                                                              else { signals.push({ name: 'Struct', bias: 'NEUT' }); }
-                                                            }
-                                
-                                                            let decision = 'WAIT';
-                                                            if (score > 0.5) decision = 'STRONG BUY';
-                                                            else if (score > 0.2) decision = 'BUY';
-                                                            else if (score < -0.5) decision = 'STRONG SELL';
-                                                            else if (score < -0.2) decision = 'SELL';
-                                
-                                                                                                                    return { decision, confidence: Math.abs(score) * 100, signals };
-                                                                                                                  })()}
-                                                                                                                  tradeSetup={(() => {
-                                                                                                                    // UNPUSHABLE: Calculate trade setup for chart markers
-                                                                                                                    const vp = chartData?.volume_profile;
-                                                                                                                    const of = chartData?.order_flow_imbalance;
-                                                                                                                    const ms = chartData?.market_structure;
-                                                                                                                    const deltaData = chartData?.delta || [];
-                                                                                                                    const price = chartData?.current_price || 0;
-                                                            
-                                                                                                                    if (!vp || !price) return null;
-                                                            
-                                                                                                                    let bullishScore = 0;
-                                                                                                                    let bearishScore = 0;
-                                                            
-                                                                                                                    // Volume Profile Analysis
-                                                                                                                    if (price > vp.vah) bullishScore += 30;
-                                                                                                                    else if (price < vp.val) bearishScore += 30;
-                                                                                                                    else if (price > vp.poc) bullishScore += 15;
-                                                                                                                    else bearishScore += 15;
-                                                            
-                                                                                                                    // Delta Analysis
-                                                                                                                    if (deltaData.length > 0) {
-                                                                                                                      const lastDelta = deltaData[deltaData.length - 1]?.cumulative_delta || 0;
-                                                                                                                      const prevDelta = deltaData[Math.max(0, deltaData.length - 10)]?.cumulative_delta || 0;
-                                                                                                                      const deltaTrend = lastDelta - prevDelta;
-                                                                                                                      if (deltaTrend > 2000) bullishScore += 35;
-                                                                                                                      else if (deltaTrend < -2000) bearishScore += 35;
-                                                                                                                      else if (deltaTrend > 500) bullishScore += 15;
-                                                                                                                      else if (deltaTrend < -500) bearishScore += 15;
-                                                                                                                    }
-                                                            
-                                                                                                                    // Order Flow Analysis
-                                                                                                                    if (of) {
-                                                                                                                      if (of.ofi_normalized > 0.6) bullishScore += 25;
-                                                                                                                      else if (of.ofi_normalized < -0.6) bearishScore += 25;
-                                                                                                                    }
-                                                            
-                                                                                                                    // Market Structure Analysis
-                                                                                                                    if (ms) {
-                                                                                                                      if (ms.structure === 'BULLISH') bullishScore += 20;
-                                                                                                                      else if (ms.structure === 'BEARISH') bearishScore += 20;
-                                                                                                                    }
-                                                            
-                                                                                                                    const confidence = Math.max(bullishScore, bearishScore);
-                                                                                                                    const direction = bullishScore > bearishScore ? 'LONG' : bearishScore > bullishScore ? 'SHORT' : 'NEUTRAL';
-                                                            
-                                                                                                                    let entry = price;
-                                                                                                                    let stopLoss = 0;
-                                                                                                                    let target1 = 0;
-                                                                                                                    let target2 = 0;
-                                                            
-                                                                                                                    if (direction === 'LONG') {
-                                                                                                                      entry = Math.min(price, vp.poc + (vp.vah - vp.poc) * 0.3);
-                                                                                                                      stopLoss = vp.val - (vp.vah - vp.val) * 0.1;
-                                                                                                                      target1 = vp.vah;
-                                                                                                                      target2 = vp.vah + (vp.vah - vp.poc) * 0.5;
-                                                                                                                    } else if (direction === 'SHORT') {
-                                                                                                                      entry = Math.max(price, vp.poc - (vp.poc - vp.val) * 0.3);
-                                                                                                                      stopLoss = vp.vah + (vp.vah - vp.val) * 0.1;
-                                                                                                                      target1 = vp.val;
-                                                                                                                      target2 = vp.val - (vp.poc - vp.val) * 0.5;
-                                                                                                                    }
-                                                            
-                                                                                                                    const risk = Math.abs(entry - stopLoss);
-                                                                                                                    const reward1 = Math.abs(target1 - entry);
-                                                                                                                    const riskReward1 = risk > 0 ? reward1 / risk : 0;
-                                                            
-                                                                                                                    return {
-                                                                                                                      direction,
-                                                                                                                      confidence,
-                                                                                                                      entry,
-                                                                                                                      stopLoss,
-                                                                                                                      target1,
-                                                                                                                      target2,
-                                                                                                                      riskReward1,
-                                                                                                                      isHighProbability: confidence >= 60 && riskReward1 >= 1.5
-                                                                                                                    };
-                                                                                                                  })()}
-                                                                                                                  delta={chartData?.delta || []}
-                                                                                                                  highlightedBars={highlightedBars}
-                                                                                                                  highlightZone={highlight.zone}
-                                                                                                                  highlightColor={highlight.color}
-                                                                                                                />
-
-              {/* WOVEN: No-Trade Fog + Evidence Pins (Why Wait) */}
-              {isNoTrade && weavePacket && (
-                <>
-                  <div className="absolute inset-0 bg-slate-950/35 backdrop-blur-[1px] pointer-events-none" />
-                  <div className="absolute left-3 top-3 right-3 pointer-events-auto">
-                    <div className="bg-slate-950/70 border border-slate-700/60 rounded-lg p-3 shadow-xl">
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="text-xs font-bold text-slate-200 tracking-wide">
-                          WHY {weavePacket.decision}
-                        </div>
-                        <div className="text-[10px] text-slate-400 font-mono">
-                          conf {weavePacket.confidence.toFixed(0)}%
-                        </div>
-                      </div>
-                      <div className="mt-1 text-[11px] text-slate-300">
-                        {weavePacket.reason_text}
-                      </div>
-
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {(weavePacket.evidence_pins || []).map((pin) => {
-                          const sev = pin.severity || 1;
-                          const isSelected = selectedPin?.pin_id === pin.pin_id;
-                          const badge =
-                            sev >= 3 ? 'bg-red-500/20 text-red-300 border-red-500/40' :
-                            sev === 2 ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
-                            'bg-cyan-500/15 text-cyan-200 border-cyan-500/30';
-                          return (
-                            <button
-                              key={pin.pin_id}
-                              onClick={() => setSelectedPin(isSelected ? null : pin)}
-                              className={`px-2 py-1 rounded-md border text-[11px] text-left max-w-[260px] truncate ${
-                                isSelected ? 'bg-slate-800/80 border-slate-400/50' : badge
-                              }`}
-                              title={`${pin.feature_name}: ${pin.description}`}
-                            >
-                              <span className="font-mono opacity-80">{pin.pin_type}</span>
-                              <span className="mx-1 opacity-40">|</span>
-                              <span className="font-semibold">{pin.feature_name}</span>
-                              <span className="mx-1 opacity-40">:</span>
-                              <span className="opacity-90">{pin.description}</span>
-                            </button>
-                          );
-                        })}
-                        {selectedPin && (
-                          <button
-                            onClick={() => setSelectedPin(null)}
-                            className="px-2 py-1 rounded-md border border-slate-600 text-[11px] text-slate-200 hover:bg-slate-800/60"
-                            title="Clear highlights"
-                          >
-                            Clear
-                          </button>
-                        )}
-                      </div>
-
-                      {(weavePacket.resolution_conditions || []).length > 0 && (
-                        <div className="mt-2">
-                          <div className="text-[10px] uppercase tracking-wide text-slate-400">
-                            Resolution Conditions
-                          </div>
-                          <ul className="mt-1 space-y-1">
-                            {(weavePacket.resolution_conditions || []).slice(0, 4).map((rc, idx) => (
-                              <li key={idx} className="text-[11px] text-slate-200">
-                                <span className="text-slate-400">-</span> {rc.condition}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </>
-              )}
-	            </div>
-	          </div>
-
-          <div className="grid grid-cols-2 gap-4" style={{ height: '25%' }}>
-            <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-              <h3 className="text-sm font-medium text-slate-400 mb-2 flex items-center gap-2">
-                <BarChart3 className="w-4 h-4" /> Bar Delta
-              </h3>
-              <div className="h-[calc(100%-30px)]">
-                <DeltaChart data={chartData?.delta || []} />
-              </div>
-            </div>
-            <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-              <h3 className="text-sm font-medium text-slate-400 mb-2 flex items-center gap-2">
-                <TrendingUp className="w-4 h-4" /> Cumulative Delta
-              </h3>
-              <div className="h-[calc(100%-30px)]">
-                <CumulativeDeltaChart data={chartData?.delta || []} />
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4" style={{ height: '25%' }}>
-            <h3 className="text-sm font-medium text-slate-400 mb-2 flex items-center gap-2">
-              <Clock className="w-4 h-4" /> Recent Trades
-            </h3>
-            <div className="overflow-auto h-[calc(100%-30px)]">
-              <table className="w-full text-xs">
-                <thead className="text-slate-500 border-b border-slate-700">
-                  <tr>
-                    <th className="text-left py-2">Symbol</th>
-                    <th className="text-left py-2">Side</th>
-                    <th className="text-right py-2">Entry</th>
-                    <th className="text-right py-2">Exit</th>
-                    <th className="text-right py-2">P&L</th>
-                    <th className="text-left py-2">Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(state?.closed_trades || []).slice(-8).reverse().map((trade, idx) => (
-                    <tr key={idx} className="border-b border-slate-800/50 hover:bg-slate-800/30">
-                      <td className="py-2 font-medium">{trade.symbol}</td>
-                      <td className={`py-2 ${trade.side === 'LONG' ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {trade.side === 'LONG' ? <ArrowUpRight className="w-3 h-3 inline" /> : <ArrowDownRight className="w-3 h-3 inline" />}
-                        {trade.side}
-                      </td>
-                      <td className="py-2 text-right font-mono">{trade.entry?.toFixed(decimals)}</td>
-                      <td className="py-2 text-right font-mono">{trade.exit?.toFixed(decimals)}</td>
-                      <td className={`py-2 text-right font-mono font-bold ${trade.pnl >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
-                        {trade.pnl >= 0 ? '+' : ''}{formatCurrency(trade.pnl)}
-                      </td>
-                      <td className="py-2">
-                        <span className={`px-1.5 py-0.5 rounded text-xs ${
-                          trade.exit_reason === 'TP1' || trade.exit_reason === 'TP2' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
-                        }`}>
-                          {trade.exit_reason}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-
-                <div className="col-span-3 space-y-4">
-                  <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-1 flex flex-wrap">
-                                        <button
-                                          onClick={() => setActiveTab('brain')}
-                                          className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
-                                            activeTab === 'brain' ? 'bg-gradient-to-r from-cyan-500/30 to-purple-500/30 text-white border border-cyan-500/50' : 'text-slate-400 hover:text-white'
-                                          }`}
-                                        >
-                                          <Brain className="w-3 h-3" /> Brain
-                                        </button>
-                                                                                <button
-                                                                                  onClick={() => setActiveTab('setup')}
-                                                                                  className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
-                                                                                    activeTab === 'setup' ? 'bg-gradient-to-r from-emerald-500/30 to-cyan-500/30 text-white border border-emerald-500/50' : 'text-slate-400 hover:text-white'
-                                                                                  }`}
-                                                                                >
-                                                                                  <Target className="w-3 h-3" /> Setup
-                                                                                </button>
-                                                                                <button
-                                                                                  onClick={() => setActiveTab('mtf')}
-                                                                                  className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
-                                                                                    activeTab === 'mtf' ? 'bg-gradient-to-r from-purple-500/30 to-pink-500/30 text-white border border-purple-500/50' : 'text-slate-400 hover:text-white'
-                                                                                  }`}
-                                                                                >
-                                                                                  <Layers className="w-3 h-3" /> MTF
-                                                                                </button>
-                                                                                <button
-                                                                                  onClick={() => setActiveTab('accuracy')}
-                                                                                  className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
-                                                                                    activeTab === 'accuracy' ? 'bg-gradient-to-r from-yellow-500/30 to-orange-500/30 text-white border border-yellow-500/50' : 'text-slate-400 hover:text-white'
-                                                                                  }`}
-                                                                                >
-                                                                                  <Award className="w-3 h-3" /> Accuracy
-                                                                                </button>
-                                                                                <button
-                                                                                  onClick={() => setActiveTab('orderflow')}
-                      className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
-                        activeTab === 'orderflow' ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-white' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <Zap className="w-3 h-3" /> Flow
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('levels')}
-                      className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
-                        activeTab === 'levels' ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-white' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <Target className="w-3 h-3" /> Levels
-                    </button>
-                    <button
-                      onClick={() => setActiveTab('risk')}
-                      className={`flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all flex items-center justify-center gap-1 ${
-                        activeTab === 'risk' ? 'bg-gradient-to-r from-cyan-500/20 to-purple-500/20 text-white' : 'text-slate-400 hover:text-white'
-                      }`}
-                    >
-                      <Shield className="w-3 h-3" /> Risk
-                    </button>
-                  </div>
-
-                                    {activeTab === 'brain' && (
-                                      <div className="h-[calc(100%-50px)]">
-                                        <UnifiedIntelligence
-                                          volumeProfile={chartData?.volume_profile || null}
-                                          orderFlow={chartData?.order_flow_imbalance || null}
-                                          marketStructure={chartData?.market_structure || null}
-                                          riskMetrics={chartData?.risk_metrics || null}
-                                          delta={chartData?.delta || []}
-                                          currentPrice={chartData?.current_price || 0}
-                                          symbol={selectedSymbol}
-                                          weavePacket={weavePacket}
-                                        />
-                                      </div>
-                                    )}
-
-                                                                        {activeTab === 'setup' && (
-                                                                          <div className="h-[calc(100%-50px)]">
-                                                                            <PredictiveTradeSetup
-                                                                              volumeProfile={chartData?.volume_profile || null}
-                                                                              orderFlow={chartData?.order_flow_imbalance || null}
-                                                                              marketStructure={chartData?.market_structure || null}
-                                                                              delta={chartData?.delta || []}
-                                                                              currentPrice={chartData?.current_price || 0}
-                                                                              symbol={selectedSymbol}
-                                                                            />
-                                                                          </div>
-                                                                        )}
-
-                                                                        {activeTab === 'mtf' && (
-                                                                          <div className="h-[calc(100%-50px)]">
-                                                                            <MultiTimeframeConfluence
-                                                                              volumeProfile={chartData?.volume_profile || null}
-                                                                              marketStructure={chartData?.market_structure || null}
-                                                                              delta={chartData?.delta || []}
-                                                                              currentPrice={chartData?.current_price || 0}
-                                                                            />
-                                                                          </div>
-                                                                        )}
-
-                                                                        {activeTab === 'accuracy' && (
-                                                                          <div className="h-[calc(100%-50px)]">
-                                                                            <HistoricalAccuracyTracker
-                                                                              closedTrades={state?.closed_trades || []}
-                                                                            />
-                                                                          </div>
-                                                                        )}
-
-                                                                        {activeTab === 'orderflow' && (
-            <>
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-                <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-                  <Gauge className="w-4 h-4" /> Order Flow Imbalance
-                </h3>
-                <SignalGauge 
-                  value={chartData?.order_flow_imbalance?.strength || 0}
-                  label={`OFI: ${(chartData?.order_flow_imbalance?.ofi_normalized || 0).toFixed(3)}`}
-                  signal={chartData?.order_flow_imbalance?.signal || 'NEUTRAL'}
-                />
-              </div>
-
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-                <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-                  <Eye className="w-4 h-4" /> Footprint Analysis
-                </h3>
-                <div className="space-y-2">
-                  <FootprintSignal 
-                    type="imbalances" 
-                    count={chartData?.footprint?.imbalances?.length || 0}
-                  />
-                  <FootprintSignal 
-                    type="absorption" 
-                    count={chartData?.footprint?.absorption_zones?.length || 0}
-                  />
-                  <FootprintSignal 
-                    type="exhaustion" 
-                    count={chartData?.footprint?.exhaustion_signals?.length || 0}
-                  />
-                </div>
-              </div>
-
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-                <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-                  <Crosshair className="w-4 h-4" /> Liquidity Sweeps
-                </h3>
-                {(chartData?.liquidity_sweeps?.length || 0) > 0 ? (
-                  <div className="space-y-2">
-                    {chartData?.liquidity_sweeps?.map((sweep, idx) => (
-                      <div key={idx} className={`p-2 rounded-lg border ${
-                        sweep.signal === 'BULLISH' ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-red-500/50 bg-red-500/10'
-                      }`}>
-                        <div className="flex items-center justify-between">
-                          <span className={`text-xs font-medium ${sweep.signal === 'BULLISH' ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {sweep.type}
-                          </span>
-                          <span className="text-xs font-mono text-white">{sweep.sweep_price?.toFixed(decimals)}</span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center text-slate-500 text-sm py-4">No recent sweeps detected</div>
-                )}
-              </div>
-            </>
-          )}
-
-                    {activeTab === 'levels' && (
-                      <>
-                        <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4" style={{ height: '200px' }}>
-                          <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-                            <Volume2 className="w-4 h-4" /> Volume Profile (DeepCharts Style)
-                          </h3>
-                          <div className="h-[calc(100%-30px)]">
-                            <VolumeProfileChart 
-                              data={chartData?.volume_profile || null}
-                              currentPrice={chartData?.current_price || 0}
-                              symbol={selectedSymbol}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4" style={{ height: '200px' }}>
-                          <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-                            <BarChart3 className="w-4 h-4" /> Delta Profile (Buy vs Sell)
-                          </h3>
-                          <div className="h-[calc(100%-30px)]">
-                            <DeltaProfileChart 
-                              data={chartData?.volume_profile || null}
-                              symbol={selectedSymbol}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-                          <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-                            <Target className="w-4 h-4" /> Key Levels
-                          </h3>
-                          <div className="space-y-1 max-h-40 overflow-auto">
-                            {(chartData?.institutional_levels?.levels || []).map((level, idx) => (
-                              <LevelRow key={idx} level={level} decimals={decimals} />
-                            ))}
-                          </div>
-                        </div>
-                      </>
-                    )}
-
-          {activeTab === 'risk' && (
-            <>
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-                <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4" /> Risk Metrics
-                </h3>
-                <div className="grid grid-cols-2 gap-2">
-                  <RiskCard label="VaR (95%)" value={chartData?.risk_metrics?.var_95 || 0} unit="%" isNegative />
-                  <RiskCard label="VaR (99%)" value={chartData?.risk_metrics?.var_99 || 0} unit="%" isNegative />
-                  <RiskCard label="Expected Shortfall" value={chartData?.risk_metrics?.expected_shortfall || 0} unit="%" isNegative />
-                  <RiskCard label="Max Drawdown" value={chartData?.risk_metrics?.max_drawdown || 0} unit="%" isNegative />
-                  <RiskCard label="Volatility (Ann.)" value={chartData?.risk_metrics?.volatility || 0} unit="%" />
-                  <RiskCard label="Sharpe Ratio" value={chartData?.risk_metrics?.sharpe_estimate || 0} unit="" />
-                </div>
-              </div>
-
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-                <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-                  <Layers className="w-4 h-4" /> Break of Structure
-                </h3>
-                {(chartData?.market_structure?.bos_signals?.length || 0) > 0 ? (
-                  <div className="space-y-2">
-                    {chartData?.market_structure?.bos_signals?.map((bos, idx) => (
-                      <div key={idx} className={`p-3 rounded-lg border ${
-                        bos.type === 'BOS_BULLISH' ? 'border-emerald-500/50 bg-emerald-500/10' : 'border-red-500/50 bg-red-500/10'
-                      }`}>
-                        <div className="flex items-center gap-2">
-                          {bos.type === 'BOS_BULLISH' ? 
-                            <ChevronUp className="w-4 h-4 text-emerald-400" /> : 
-                            <ChevronDown className="w-4 h-4 text-red-400" />
-                          }
-                          <span className={`text-sm font-medium ${bos.type === 'BOS_BULLISH' ? 'text-emerald-400' : 'text-red-400'}`}>
-                            {bos.type.replace('_', ' ')}
-                          </span>
-                        </div>
-                        <div className="text-xs text-slate-400 mt-1">
-                          Broken: {bos.broken_level?.toFixed(decimals)} | Current: {bos.current_price?.toFixed(decimals)}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="text-center text-slate-500 text-sm py-4">No BOS signals</div>
-                )}
-              </div>
-
-              <div className="bg-[#0f1420] rounded-xl border border-slate-800 p-4">
-                <h3 className="text-sm font-medium text-slate-400 mb-3 flex items-center gap-2">
-                  <Activity className="w-4 h-4" /> Swing Points
-                </h3>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <div className="text-xs text-slate-500 mb-2">Swing Highs</div>
-                    {(chartData?.market_structure?.swing_highs || []).slice(-3).map((sh, idx) => (
-                      <div key={idx} className="text-sm font-mono text-emerald-400 py-0.5">
-                        {sh.price?.toFixed(decimals)}
-                      </div>
-                    ))}
-                  </div>
-                  <div>
-                    <div className="text-xs text-slate-500 mb-2">Swing Lows</div>
-                    {(chartData?.market_structure?.swing_lows || []).slice(-3).map((sl, idx) => (
-                      <div key={idx} className="text-sm font-mono text-red-400 py-0.5">
-                        {sl.price?.toFixed(decimals)}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-
-      <footer className="fixed bottom-0 left-0 right-0 bg-[#0f1420] border-t border-slate-800 px-6 py-2">
-        <div className="flex items-center justify-between text-xs text-slate-500">
-          <div className="flex items-center gap-4">
-            <span>OMEGA-DEVIN v5.0.0-INSTITUTIONAL</span>
-            <span className="text-slate-700">|</span>
-            <span>Powered by Breakthrough Intelligence</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span>Last Update: {lastUpdate.toLocaleTimeString()}</span>
-            <span className="text-slate-700">|</span>
-            <span className={isConnected ? 'text-emerald-400' : 'text-red-400'}>
-              {isConnected ? 'Connected to Backend' : 'Disconnected'}
-            </span>
-          </div>
-        </div>
-      </footer>
-    </div>
-  );
+  return <><style>{styles}</style><TerminalShell /></>;
 }
+
+const styles = `
+:root { color-scheme: dark; background: #020409; font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+* { box-sizing: border-box; }
+body { margin: 0; background: radial-gradient(circle at 50% 0%, #0a1a29 0%, #020409 42%, #000 100%); color: #e5f7ff; }
+button { border: 1px solid rgba(104, 232, 255, 0.28); background: linear-gradient(180deg, rgba(16, 35, 48, 0.96), rgba(4, 9, 16, 0.96)); color: #e8fbff; border-radius: 999px; padding: 10px 16px; font-weight: 700; letter-spacing: 0.02em; cursor: pointer; box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 14px 40px rgba(0,0,0,0.32); }
+button:hover { border-color: rgba(216, 183, 106, 0.75); transform: translateY(-1px); }
+.wraith-shell { min-height: 100vh; padding: 14px; background-image: linear-gradient(rgba(104,232,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(104,232,255,0.025) 1px, transparent 1px); background-size: 44px 44px; }
+.top-rail { display: grid; grid-template-columns: 1.3fr repeat(11, minmax(84px, auto)); gap: 8px; align-items: stretch; margin-bottom: 10px; }
+.brand-block, .status-pill, .panel { border: 1px solid rgba(104, 232, 255, 0.16); background: linear-gradient(180deg, rgba(9, 18, 30, 0.92), rgba(3, 7, 13, 0.95)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.045), 0 16px 50px rgba(0,0,0,0.35); backdrop-filter: blur(18px); }
+.brand-block { border-radius: 18px; padding: 12px 14px; }
+.brand-block strong { display: block; font-size: 14px; letter-spacing: 0.12em; }
+.micro-label { display: block; color: #68e8ff; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; margin-bottom: 4px; }
+.status-pill { border-radius: 14px; padding: 10px; min-width: 84px; overflow: hidden; }
+.status-pill.wide { min-width: 170px; }
+.status-pill span, .metric span, .context-line span { display: block; color: #74879a; font-size: 10px; text-transform: uppercase; letter-spacing: 0.12em; }
+.status-pill strong { display: block; margin-top: 4px; color: #f5fbff; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.control-deck { display: flex; gap: 10px; justify-content: center; margin: 12px 0; }
+.terminal-grid { display: grid; grid-template-columns: minmax(260px, 0.75fr) minmax(620px, 2fr) minmax(280px, 0.85fr); gap: 12px; align-items: start; }
+.left-rail, .decision-spine, .center-stack, .orbit-panel { display: grid; gap: 12px; }
+.lower-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.panel { position: relative; border-radius: 22px; padding: 14px; overflow: hidden; }
+.panel:before { content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; background: radial-gradient(circle at top right, rgba(104,232,255,0.1), transparent 42%); }
+.panel-gold { border-color: rgba(216, 183, 106, 0.25); }
+.panel-danger { border-color: rgba(249, 112, 112, 0.3); }
+.panel-title { position: relative; display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; color: #ecfbff; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; font-size: 11px; }
+.panel-title:after { content: ''; flex: 1; height: 1px; margin-left: 12px; background: linear-gradient(90deg, rgba(104,232,255,0.4), transparent); }
+.xray-field { border-radius: 26px; border: 1px solid rgba(104,232,255,0.18); background: radial-gradient(circle at 50% 10%, rgba(104,232,255,0.09), rgba(4,8,14,0.96) 46%); padding: 16px; box-shadow: 0 24px 80px rgba(0,0,0,0.48); }
+.field-title { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.field-title strong { font-size: 18px; letter-spacing: 0.06em; }
+.legend { color: #8fa1b4; font-size: 11px; }
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 5px 0 12px; }
+.cyan { background: #68e8ff; } .gold { background: #d8b76a; } .red { background: #f97070; }
+.market-svg { width: 100%; height: auto; display: block; }
+.clickable-candle { cursor: pointer; transition: opacity 180ms ease; }
+.clickable-candle:hover { opacity: 0.72; }
+.path-animate { stroke-dashoffset: 160; animation: flowPath 3.5s linear infinite; }
+.path-animate.reverse { animation-direction: reverse; }
+@keyframes flowPath { to { stroke-dashoffset: 0; } }
+.diagnostic-strip, .packet-strip, .decision-grid, .spine-metrics, .inspector-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.metric { border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.035); border-radius: 14px; padding: 10px; min-height: 58px; }
+.metric strong { display: block; margin-top: 5px; font-size: 15px; overflow-wrap: anywhere; }
+.metric-cyan strong, .state-wait { color: #68e8ff; } .metric-green strong, .state-positive { color: #6ee7b7; } .metric-gold strong { color: #d8b76a; } .metric-red strong, .state-danger { color: #f97070; } .state-lock { color: #ff4d4d; }
+.context-line { display: grid; grid-template-columns: 0.42fr 1fr; gap: 8px; align-items: baseline; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.context-line strong { color: #e8faff; font-size: 12px; }
+.tight-list { margin: 0; padding-left: 18px; color: #b8c8d8; line-height: 1.45; }
+.beginner-copy { color: #ffffff; font-size: 18px; line-height: 1.25; margin-bottom: 8px; }
+.what-next { display: grid; gap: 5px; margin-top: 10px; padding: 10px; border: 1px solid rgba(104,232,255,0.13); border-radius: 14px; background: rgba(104,232,255,0.04); }
+.danger-text { color: #fca5a5; border-color: rgba(249,112,112,0.18); background: rgba(249,112,112,0.04); }
+.certificate .verdict { font-size: 26px; font-weight: 900; letter-spacing: 0.08em; }
+.certificate .direction { color: #d8b76a; font-weight: 800; margin-top: 4px; }
+.certificate p, .panel p { color: #b7c8d9; line-height: 1.5; }
+.governor-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.gate { display: flex; justify-content: space-between; gap: 8px; padding: 9px; border-radius: 12px; background: rgba(255,255,255,0.035); color: #a9bacb; font-size: 12px; }
+.gate-open strong { color: #6ee7b7; } .gate-closed strong { color: #f97070; }
+.execution-lock { margin-top: 10px; padding: 12px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.1); }
+.execution-lock.locked { background: repeating-linear-gradient(135deg, rgba(249,112,112,0.16), rgba(249,112,112,0.16) 8px, rgba(10,10,10,0.2) 8px, rgba(10,10,10,0.2) 16px); }
+.execution-lock.armed { background: rgba(110,231,183,0.07); }
+.lock-title { font-weight: 900; letter-spacing: 0.12em; margin-bottom: 5px; }
+.risk-head, .scenario-title, .agent-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 800; }
+.action-pill { display: inline-block; margin-top: 10px; padding: 8px 10px; border-radius: 999px; color: #f7e4af; background: rgba(216,183,106,0.1); border: 1px solid rgba(216,183,106,0.22); font-size: 12px; text-transform: uppercase; }
+.scenario-stack, .agent-grid, .brittle-grid { display: grid; gap: 10px; }
+.scenario-card, .agent-card, .brittle-card { border: 1px solid rgba(255,255,255,0.08); background: rgba(255,255,255,0.035); border-radius: 16px; padding: 12px; }
+.scenario-card small, .agent-card small, .brittle-card span { color: #8fb7c7; }
+.agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.agent-card p { margin: 8px 0; font-size: 12px; }
+.agent-risk { border-color: rgba(249,112,112,0.3); }
+.bias { display: inline-flex; margin-top: 8px; padding: 4px 8px; border-radius: 999px; font-size: 10px; font-weight: 900; }
+.bias-bullish { color: #6ee7b7; background: rgba(110,231,183,0.08); } .bias-bearish { color: #f97070; background: rgba(249,112,112,0.08); } .bias-neutral { color: #d8b76a; background: rgba(216,183,106,0.08); }
+.agent-foot { display: flex; justify-content: space-between; margin-top: 8px; color: #72869a; font-size: 10px; text-transform: uppercase; }
+.ledger-table { display: grid; gap: 6px; }
+.ledger-row { display: grid; grid-template-columns: 1fr 0.9fr 0.9fr 1.4fr 0.7fr 0.7fr; gap: 8px; padding: 8px; border-radius: 10px; background: rgba(255,255,255,0.035); color: #9fb2c4; font-size: 11px; }
+.capsule-orbit { display: grid; grid-template-columns: minmax(280px, 0.9fr) minmax(460px, 1.2fr) minmax(280px, 0.9fr); gap: 14px; align-items: center; max-width: 1560px; margin: 0 auto; }
+.candle-stage { min-height: 680px; display: grid; place-items: center; border-radius: 34px; border: 1px solid rgba(104,232,255,0.2); background: radial-gradient(circle at 50% 46%, rgba(104,232,255,0.16), rgba(5,9,15,0.95) 52%, rgba(0,0,0,0.98)); box-shadow: 0 34px 100px rgba(0,0,0,0.55); padding: 20px; }
+.stage-header { text-align: center; align-self: end; }
+.stage-header h1 { margin: 0; font-size: clamp(32px, 5vw, 64px); letter-spacing: 0.06em; }
+.stage-header p { color: #b7c8d9; margin: 8px 0 0; }
+.iq-candle-svg { width: min(100%, 560px); filter: drop-shadow(0 0 45px rgba(104,232,255,0.14)); }
+.capsule-bottom { max-width: 1560px; margin: 14px auto 0; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+.capsule-bottom .diagnostic-strip { grid-column: 1 / -1; }
+.architecture-summary, .brittle-section { margin-top: 14px; }
+.arch-flow { display: flex; flex-wrap: wrap; gap: 8px; }
+.arch-flow span { padding: 8px 10px; border-radius: 999px; background: rgba(104,232,255,0.06); border: 1px solid rgba(104,232,255,0.18); color: #bff5ff; font-size: 12px; }
+.brittle-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.brittle-card strong { color: #fff; display: block; margin-bottom: 6px; }
+.brittle-card p { font-size: 12px; margin: 0 0 8px; }
+.expert-reason { font-size: 12px; }
+@media (max-width: 1280px) { .top-rail, .terminal-grid, .capsule-orbit, .capsule-bottom, .lower-grid { grid-template-columns: 1fr; } .agent-grid, .brittle-grid { grid-template-columns: 1fr; } .status-pill.wide { min-width: 0; } }
+@media (max-width: 760px) { .diagnostic-strip, .packet-strip, .decision-grid, .spine-metrics, .inspector-grid, .governor-grid { grid-template-columns: 1fr 1fr; } .control-deck { flex-direction: column; } .ledger-row { grid-template-columns: 1fr; } }
+`;
 
 export default App;
