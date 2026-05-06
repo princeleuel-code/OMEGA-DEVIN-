@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type MouseEvent, type ReactNode } from 'react';
 
 type TerminalMode = 'capsule' | 'command';
 type ComprehensionMode = 'beginner' | 'expert';
@@ -610,7 +610,7 @@ function TopStatusRail({ marketState, decision, mode }: { marketState: MarketSta
   const executionMode = mode === 'paper' ? 'PAPER' : 'SIM';
   return (
     <header className="top-rail">
-      <div className="brand-block"><span className="micro-label">WRAITH LEAP OS</span><strong>AGI X-RAY TRADING TERMINAL</strong></div>
+      <div className="brand-block"><span className="micro-label">WRAITH X-RAY // SINGULARITY</span><strong>AGI TRADING TERMINAL</strong><small>Autonomous quantitative intelligence</small></div>
       <StatusPill label="Symbol" value={marketState.symbol} /><StatusPill label="TF" value={marketState.timeframe} /><StatusPill label="Session" value={marketState.session} />
       <StatusPill label="State" value={marketState.regime} wide /><StatusPill label="Playbook" value={marketState.activePlaybook} wide /><StatusPill label="Risk" value={mode === 'paper' ? 'Paper governed' : 'Manual'} />
       <StatusPill label="Verdict" value={decision.verdict.replace('_', ' ')} className={classForVerdict(decision.verdict)} /><StatusPill label="Truth" value={pct(marketState.truthSync)} /><StatusPill label="Health" value={pct(marketState.systemHealth)} /><StatusPill label="Latency" value={`${marketState.dataLatencyMs}ms`} /><StatusPill label="Execution" value={decision.verdict === 'HARD_LOCK' ? 'LIVE LOCKED' : executionMode} />
@@ -619,7 +619,8 @@ function TopStatusRail({ marketState, decision, mode }: { marketState: MarketSta
 }
 
 function LeftContextRail({ marketState, candle, decision }: { marketState: MarketState; candle: CandleTruthPacket; decision: VerdictDecision }) {
-  return <aside className="left-rail"><Panel title="Market Context" accent="cyan"><ContextLine label="Regime" value={marketState.regime} /><ContextLine label="HTF trend" value={marketState.higherTimeframeTrend} /><ContextLine label="Liquidity" value={candle.liquiditySweepHigh ? 'Buy-side swept' : candle.liquiditySweepLow ? 'Sell-side swept' : 'Balanced'} /><ContextLine label="Event risk" value={marketState.eventRisk} /><ContextLine label="Manipulation" value={pct(candle.manipulationRisk)} /></Panel><BeginnerTranslator candle={candle} decision={decision} /><Panel title="System Locks" accent="danger"><ul className="tight-list"><li>Live execution remains locked.</li><li>No guaranteed profit claims.</li><li>Hard abstain if proof weakens.</li><li>Legal intelligence only.</li></ul></Panel></aside>;
+  const modules = ['Market Intelligence', 'Order Flow X-Ray', 'Auction Intelligence', 'Liquidity Hunter', 'Risk Engine', 'Execution Engine', 'Narrative Reasoner', 'Scenario Simulator'];
+  return <aside className="left-rail"><Panel title="System Architecture" accent="cyan"><div className="module-list">{modules.map((module) => <div key={module} className="module-row"><span>{module}</span><strong>ACTIVE</strong></div>)}</div></Panel><Panel title="Market Context" accent="cyan"><ContextLine label="Regime" value={marketState.regime} /><ContextLine label="HTF trend" value={marketState.higherTimeframeTrend} /><ContextLine label="Liquidity" value={candle.liquiditySweepHigh ? 'Buy-side swept' : candle.liquiditySweepLow ? 'Sell-side swept' : 'Balanced'} /><ContextLine label="Event risk" value={marketState.eventRisk} /><ContextLine label="Manipulation" value={pct(candle.manipulationRisk)} /></Panel><BeginnerTranslator candle={candle} decision={decision} /><Panel title="System Locks" accent="danger"><ul className="tight-list"><li>Live execution remains locked.</li><li>No guaranteed profit claims.</li><li>Hard abstain if proof weakens.</li><li>Legal intelligence only.</li></ul></Panel></aside>;
 }
 
 function XRayMarketField({ marketState, selectedId, setSelectedId, decision }: { marketState: MarketState; selectedId: string; setSelectedId: (id: string) => void; decision: VerdictDecision }) {
@@ -630,6 +631,13 @@ function XRayMarketField({ marketState, selectedId, setSelectedId, decision }: {
   const step = 820 / marketState.candles.length;
   const selectedIndex = marketState.candles.findIndex((candle) => candle.id === selected.id);
   const selectedX = 28 + selectedIndex * step;
+  const maxProfileVolume = Math.max(...selected.internalProfile.map((level) => level.volume));
+  const handleFieldClick = (event: MouseEvent<SVGSVGElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const viewX = ((event.clientX - bounds.left) / bounds.width) * 900;
+    const candleIndex = Math.max(0, Math.min(marketState.candles.length - 1, Math.round((viewX - 28) / step)));
+    setSelectedId(marketState.candles[candleIndex].id);
+  };
   const linePath = marketState.candles.map((candle, index) => `${index === 0 ? 'M' : 'L'} ${28 + index * step} ${priceToY(candle.close)}`).join(' ');
   const likelyEnd = decision.direction === 'SHORT' ? decision.targets[0] : decision.targets[0];
   const failureEnd = decision.invalidation;
@@ -638,13 +646,25 @@ function XRayMarketField({ marketState, selectedId, setSelectedId, decision }: {
   return (
     <main className="xray-field">
       <div className="field-title"><div><span className="micro-label">Central X-Ray Market Field</span><strong>Panoramic IQ Candle Chart</strong></div><div className="legend"><span className="dot cyan" />truth <span className="dot gold" />value <span className="dot red" />danger</div></div>
-      <svg viewBox="0 0 900 340" className="market-svg" role="img" aria-label="X-ray candle market field">
+      <div className="market-stage">
+      <svg viewBox="0 0 900 340" className="market-svg" role="img" aria-label="X-ray candle market field" onClick={handleFieldClick}>
         <defs><linearGradient id="coreGlow" x1="0" x2="1"><stop offset="0" stopColor="#68e8ff" stopOpacity="0.05" /><stop offset="1" stopColor="#d8b76a" stopOpacity="0.16" /></linearGradient><filter id="softGlow"><feGaussianBlur stdDeviation="3" result="blur" /><feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge></filter></defs>
         <rect x="18" y="38" width="850" height="270" rx="22" fill="url(#coreGlow)" stroke="#1b3c49" />
         {[selected.vah, selected.poc, selected.val].map((price, index) => <g key={price}><line x1="24" x2="864" y1={priceToY(price)} y2={priceToY(price)} stroke={index === 1 ? '#d8b76a' : '#55d8f3'} strokeDasharray={index === 1 ? '0' : '8 9'} opacity="0.65" /><text x="34" y={priceToY(price) - 5} fill={index === 1 ? '#d8b76a' : '#55d8f3'} fontSize="10">{index === 0 ? 'VAH' : index === 1 ? 'POC' : 'VAL'} {fmt(price)}</text></g>)}
         <path d={linePath} fill="none" stroke="#7de9ff" strokeWidth="2.5" opacity="0.58" />
         <path d={likelyPath} fill="none" stroke="#6ee7b7" strokeWidth="2" strokeDasharray="8 10" className="path-animate" />
         <path d={failurePath} fill="none" stroke="#f97070" strokeWidth="2" strokeDasharray="5 10" className="path-animate reverse" />
+        <g opacity="0.88">
+          <text x="777" y="58" fill="#8beaff" fontSize="10">AUCTION PROFILE</text>
+          {selected.internalProfile.map((level) => {
+            const width = (level.volume / maxProfileVolume) * 72;
+            const fill = level.price === selected.poc ? '#d8b76a' : level.price >= selected.poc ? '#2aa6bd' : '#c89218';
+            return <rect key={level.price} x={790} y={priceToY(level.price) - 4} width={width} height="6" rx="3" fill={fill} opacity={level.price === selected.poc ? 0.95 : 0.62} />;
+          })}
+          <text x="790" y={priceToY(selected.poc) - 7} fill="#d8b76a" fontSize="9">POC {fmt(selected.poc)}</text>
+          <text x="790" y={priceToY(selected.vah) - 7} fill="#6ee7b7" fontSize="9">VAH {fmt(selected.vah)}</text>
+          <text x="790" y={priceToY(selected.val) + 13} fill="#f0b849" fontSize="9">VAL {fmt(selected.val)}</text>
+        </g>
         {marketState.candles.map((candle, index) => {
           const x = 28 + index * step;
           const yOpen = priceToY(candle.open);
@@ -655,11 +675,16 @@ function XRayMarketField({ marketState, selectedId, setSelectedId, decision }: {
           const height = Math.max(Math.abs(yClose - yOpen), 3);
           const selectedCandle = candle.id === selectedId;
           const color = candle.close >= candle.open ? '#77e9c1' : '#ef7777';
-          return <g key={candle.id} onClick={() => setSelectedId(candle.id)} className="clickable-candle"><line x1={x} x2={x} y1={yHigh} y2={yLow} stroke={color} strokeWidth={selectedCandle ? 3 : 1.4} opacity="0.9" /><rect x={x - 6} y={top} width="12" height={height} rx="3" fill={color} opacity={selectedCandle ? 0.95 : 0.6} stroke={selectedCandle ? '#ffffff' : 'transparent'} />{candle.absorptionNodes.length > 2 && <circle cx={x} cy={priceToY(candle.poc)} r={selectedCandle ? 7 : 4} fill="#d8b76a" opacity="0.84" filter="url(#softGlow)" />}{(candle.liquiditySweepHigh || candle.liquiditySweepLow) && <path d={`M ${x - 7} ${candle.liquiditySweepHigh ? yHigh - 10 : yLow + 10} L ${x} ${candle.liquiditySweepHigh ? yHigh - 20 : yLow + 20} L ${x + 7} ${candle.liquiditySweepHigh ? yHigh - 10 : yLow + 10}`} fill="none" stroke="#d65cff" strokeWidth="2" />}</g>;
+          return <g key={candle.id} onClick={() => setSelectedId(candle.id)} className="clickable-candle"><rect x={x - 10} y="40" width="20" height="266" fill="transparent" /><line x1={x} x2={x} y1={yHigh} y2={yLow} stroke={color} strokeWidth={selectedCandle ? 3 : 1.4} opacity="0.9" /><rect x={x - 6} y={top} width="12" height={height} rx="3" fill={color} opacity={selectedCandle ? 0.95 : 0.6} stroke={selectedCandle ? '#ffffff' : 'transparent'} />{candle.absorptionNodes.length > 2 && <circle cx={x} cy={priceToY(candle.poc)} r={selectedCandle ? 7 : 4} fill="#d8b76a" opacity="0.84" filter="url(#softGlow)" />}{(candle.liquiditySweepHigh || candle.liquiditySweepLow) && <path d={`M ${x - 7} ${candle.liquiditySweepHigh ? yHigh - 10 : yLow + 10} L ${x} ${candle.liquiditySweepHigh ? yHigh - 20 : yLow + 20} L ${x + 7} ${candle.liquiditySweepHigh ? yHigh - 10 : yLow + 10}`} fill="none" stroke="#d65cff" strokeWidth="2" />}</g>;
         })}
         <rect x="594" y="72" width="236" height="88" rx="16" fill="#050a12" stroke="#284552" opacity="0.92" />
         <text x="610" y="96" fill="#8beaff" fontSize="11">SELECTED MARKET TRUTH PACKET</text><text x="610" y="122" fill="#ffffff" fontSize="21" fontWeight="700">{selected.id} · {selected.verdict.replace('_', ' ')}</text><text x="610" y="145" fill="#9fb2c4" fontSize="12">Trap: {selected.trappedSide} · Trust {pct(selected.trustScore)} · Toxicity {pct(selected.toxicity)}</text>
       </svg>
+      <div className="candle-hit-layer" aria-label="Candle click targets">{marketState.candles.map((candle, index) => {
+        const x = 28 + index * step;
+        return <button key={candle.id} type="button" className="candle-hit" style={{ left: `${((x - 10) / 900) * 100}%`, top: `${(40 / 340) * 100}%`, width: `${(20 / 900) * 100}%`, height: `${(266 / 340) * 100}%` }} aria-label={`Inspect ${candle.id}`} onClick={() => setSelectedId(candle.id)} />;
+      })}</div>
+      </div>
     </main>
   );
 }
@@ -759,6 +784,7 @@ button:hover { border-color: rgba(216, 183, 106, 0.75); transform: translateY(-1
 .brand-block, .status-pill, .panel { border: 1px solid rgba(104, 232, 255, 0.16); background: linear-gradient(180deg, rgba(9, 18, 30, 0.92), rgba(3, 7, 13, 0.95)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.045), 0 16px 50px rgba(0,0,0,0.35); backdrop-filter: blur(18px); }
 .brand-block { border-radius: 18px; padding: 12px 14px; }
 .brand-block strong { display: block; font-size: 14px; letter-spacing: 0.12em; }
+.brand-block small { display: block; margin-top: 6px; color: #7f93a7; font-size: 9px; letter-spacing: 0.16em; text-transform: uppercase; }
 .micro-label { display: block; color: #68e8ff; font-size: 10px; text-transform: uppercase; letter-spacing: 0.18em; margin-bottom: 4px; }
 .status-pill { border-radius: 14px; padding: 10px; min-width: 84px; overflow: hidden; }
 .status-pill.wide { min-width: 170px; }
@@ -780,9 +806,16 @@ button:hover { border-color: rgba(216, 183, 106, 0.75); transform: translateY(-1
 .legend { color: #8fa1b4; font-size: 11px; }
 .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin: 0 5px 0 12px; }
 .cyan { background: #68e8ff; } .gold { background: #d8b76a; } .red { background: #f97070; }
+.market-stage { position: relative; }
 .market-svg { width: 100%; height: auto; display: block; }
+.candle-hit-layer { position: absolute; inset: 0; z-index: 2; }
+.candle-hit { position: absolute; padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.candle-hit:hover { background: rgba(104,232,255,0.08); transform: none; }
 .clickable-candle { cursor: pointer; transition: opacity 180ms ease; }
 .clickable-candle:hover { opacity: 0.72; }
+.module-list { display: grid; gap: 7px; }
+.module-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 8px; border-radius: 10px; background: rgba(255,255,255,0.035); color: #a9bacb; font-size: 10px; text-transform: uppercase; letter-spacing: 0.08em; }
+.module-row strong { color: #6ee7b7; font-size: 10px; }
 .path-animate { stroke-dashoffset: 160; animation: flowPath 3.5s linear infinite; }
 .path-animate.reverse { animation-direction: reverse; }
 @keyframes flowPath { to { stroke-dashoffset: 0; } }
